@@ -28,6 +28,9 @@ final class CarouselPanelView: NSView {
         return headerH + CGFloat(c) * cardH + CGFloat(c - 1) * cardGap + dotsH
     }
 
+    /// Fixed height the finance page needs (NW + delta + liquid + 3 movers).
+    static let financeHeight: CGFloat = 200
+
     /// Called with a meeting id when its card is clicked (used to acknowledge
     /// an alerting meeting and stop the flash).
     var onCardClick: ((String) -> Void)?
@@ -197,7 +200,11 @@ final class CarouselPanelView: NSView {
                  font: mono(12, .regular), color: dim)
         }
 
-        var y = bounds.maxY - 108
+        let liq = brl.string(from: NSNumber(value: s.liquidNetWorth)) ?? "—"
+        draw("Liquid  \(liq)", at: NSPoint(x: c.minX, y: bounds.maxY - 104),
+             font: mono(11, .regular), color: NSColor(white: 0.62, alpha: 1))
+
+        var y = bounds.maxY - 134
         for m in s.movers.prefix(3) {
             let pos = m.deltaAbs >= 0
             draw(truncate(m.name, w: c.width - 70, font: sans(11, .regular)),
