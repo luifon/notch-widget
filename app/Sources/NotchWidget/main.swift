@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.addSubview(carousel)
         container.onHoverChange = { [weak self] hovering in self?.hoverChanged(hovering) }
         carousel.onCardClick = { [weak self] id in self?.acknowledge(id) }
+        carousel.onAgentClick = { [weak self] id in self?.ackAgent(id) }
 
         panel = NotchPanel(contentRect: NSRect(x: 0, y: 0, width: 100, height: bandHeight))
         panel.contentView = container
@@ -78,9 +79,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ])
             let nowMs = Date().timeIntervalSince1970 * 1000
             agentsSummary = AgentsSummary(asOf: nil, count: 3, needsAttention: [
-                .init(label: "Review the diff", repo: "acme-web", engine: "claude", state: "done", since: nowMs - 320_000),
-                .init(label: "Fix the migration", repo: "toolkit", engine: "codex", state: "interrupted", since: nowMs - 1_500_000),
-                .init(label: "Draft release notes", repo: "demo-app", engine: "claude", state: "done", since: nowMs - 60_000),
+                .init(id: "wt1", label: "Review the diff", repo: "acme-web", engine: "claude", state: "review", since: nowMs - 320_000),
+                .init(id: "wt2", label: "Fix the migration", repo: "toolkit", engine: "codex", state: "interrupted", since: nowMs - 1_500_000),
+                .init(id: "wt3", label: "Draft release notes", repo: "demo-app", engine: "claude", state: "finished", since: nowMs - 60_000),
             ])
             rebuildPages()
             bandView.apply(BandState(left: "Daily RJ", right: "in 3m", urgency: .now))
@@ -150,6 +151,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !mockMode else { return }
         financeSummary = finance.load()
         agentsSummary = agentsSource.load()
+        rebuildPages()
+    }
+
+    /// Acknowledge an agent worktree: record it (the emitter stops flagging it)
+    /// and drop it from the current view immediately.
+    private func ackAgent(_ id: String) {
+        AgentsSource.acknowledge(id)
+        guard let s = agentsSummary else { return }
+        let remaining = s.needsAttention.filter { $0.id != id }
+        agentsSummary = AgentsSummary(asOf: s.asOf, count: remaining.count, needsAttention: remaining)
         rebuildPages()
     }
 

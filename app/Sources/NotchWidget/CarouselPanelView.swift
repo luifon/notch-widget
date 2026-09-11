@@ -42,6 +42,9 @@ final class CarouselPanelView: NSView {
     /// an alerting meeting and stop the flash).
     var onCardClick: ((String) -> Void)?
     private var cardHits: [(rect: NSRect, id: String)] = []
+    /// Called with a worktree id when its agent row is clicked (acknowledge).
+    var onAgentClick: ((String) -> Void)?
+    private var agentHits: [(rect: NSRect, id: String)] = []
 
     private enum Side { case left, right }
     private var hoveredArrow: Side?
@@ -98,7 +101,11 @@ final class CarouselPanelView: NSView {
         if pages.count > 1 && p.x > bounds.maxX - Self.arrowZone { page(1); return }
         // click on a meeting card → acknowledge it
         if let hit = cardHits.first(where: { $0.rect.contains(p) }) {
-            onCardClick?(hit.id)
+            onCardClick?(hit.id); return
+        }
+        // click on an agent row → acknowledge it
+        if let hit = agentHits.first(where: { $0.rect.contains(p) }) {
+            onAgentClick?(hit.id)
         }
     }
 
@@ -126,6 +133,8 @@ final class CarouselPanelView: NSView {
         bottomRounded(bounds, radius: cornerRadius).fill()
         guard !pages.isEmpty else { return }
 
+        cardHits.removeAll()
+        agentHits.removeAll()
         switch pages[index] {
         case .meetings(let cards): drawMeetings(cards)
         case .finance(let s): drawFinance(s)
@@ -244,6 +253,7 @@ final class CarouselPanelView: NSView {
             let repoPart = it.repo.isEmpty ? "" : "\(it.repo) · "
             draw("\(repoPart)\(it.engine) · \(it.state)\(ago(it.since))",
                  at: NSPoint(x: c.minX + 16, y: y - 22), font: mono(10, .regular), color: dim)
+            agentHits.append((NSRect(x: c.minX, y: y - 30, width: c.width, height: 40), it.id))
             y -= 42
         }
     }
