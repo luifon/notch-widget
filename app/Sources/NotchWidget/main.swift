@@ -19,7 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let finance = FinanceSource()
     private var financeSummary: FinanceSummary?
-    private var financeTimer: Timer?
+    private let agentsSource = AgentsSource()
+    private var agentsSummary: AgentsSummary?
+    private var externalTimer: Timer?
     private var mockMode = false
 
     private let expandedWidth: CGFloat = 470
@@ -74,6 +76,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     .init(name: "BTC", deltaAbs: -800, deltaPct: -0.9),
                     .init(name: "IVVB11", deltaAbs: 600, deltaPct: 0.4),
                 ])
+            let nowMs = Date().timeIntervalSince1970 * 1000
+            agentsSummary = AgentsSummary(asOf: nil, count: 3, needsAttention: [
+                .init(label: "Review the diff", repo: "acme-web", engine: "claude", state: "done", since: nowMs - 320_000),
+                .init(label: "Fix the migration", repo: "toolkit", engine: "codex", state: "interrupted", since: nowMs - 1_500_000),
+                .init(label: "Draft release notes", repo: "demo-app", engine: "claude", state: "done", since: nowMs - 60_000),
+            ])
             rebuildPages()
             bandView.apply(BandState(left: "Daily RJ", right: "in 3m", urgency: .now))
             lastCards = mock
@@ -105,9 +113,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        refreshFinance()
-        financeTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
-            self?.refreshFinance()
+        refreshExternal()
+        externalTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.refreshExternal()
         }
 
         log("notch widget up")
@@ -131,15 +139,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// summary. Preserves the current page index when still valid.
     private func rebuildPages() {
         var pages: [PageContent] = [.meetings(lastCards)]
+        if let a = agentsSummary { pages.append(.agents(a)) }
         if let f = financeSummary { pages.append(.finance(f)) }
         let keep = min(carousel.index, pages.count - 1)
         carousel.pages = pages
         carousel.index = max(0, keep)
     }
 
-    private func refreshFinance() {
+    private func refreshExternal() {
         guard !mockMode else { return }
         financeSummary = finance.load()
+        agentsSummary = agentsSource.load()
         rebuildPages()
     }
 
@@ -206,13 +216,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setExpanded(_ expanded: Bool, force: Bool = false) {
         guard expanded != isExpanded || force else { return }
         isExpanded = expanded
-        if expanded { refreshFinance() }        // pick up the latest summary on open
+        if expanded { refreshExternal() }       // pick up the latest summaries on open
         bandView.cornerRadius = expanded ? 0 : 11
 
         let frame: NSRect
         if expanded {
             carousel.isHidden = false
             var ph = CarouselPanelView.panelHeight(meetingCards: meetingCount)
+            if let a = agentsSummary { ph = max(ph, CarouselPanelView.agentsHeight(a.needsAttention.count)) }
             if financeSummary != nil { ph = max(ph, CarouselPanelView.financeHeight) }
             let (f, gapMinX) = geo.expandedFrame(width: expandedWidth, panelHeight: ph, barExtra: barExtra)
             bandView.gapMinX = gapMinX

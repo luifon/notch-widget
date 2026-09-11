@@ -5,6 +5,7 @@ import QuartzCore
 enum PageContent {
     case meetings([MeetingCard])
     case finance(FinanceSummary)
+    case agents(AgentsSummary)
     case simple(kicker: String, title: String, meta: String)
 }
 
@@ -30,6 +31,12 @@ final class CarouselPanelView: NSView {
 
     /// Fixed height the finance page needs (NW + delta + liquid + 3 movers).
     static let financeHeight: CGFloat = 200
+
+    /// Height the agents page needs for `n` rows (up to 4 shown).
+    static func agentsHeight(_ n: Int) -> CGFloat {
+        let c = max(1, min(4, n))
+        return headerH + CGFloat(c) * 42 + dotsH
+    }
 
     /// Called with a meeting id when its card is clicked (used to acknowledge
     /// an alerting meeting and stop the flash).
@@ -122,6 +129,7 @@ final class CarouselPanelView: NSView {
         switch pages[index] {
         case .meetings(let cards): drawMeetings(cards)
         case .finance(let s): drawFinance(s)
+        case .agents(let a): drawAgents(a)
         case .simple(let k, let t, let m): drawSimple(k, t, m)
         }
 
@@ -213,6 +221,40 @@ final class CarouselPanelView: NSView {
             draw(pct, at: NSPoint(x: c.maxX - 52, y: y), font: mono(11, .regular), color: pos ? up : down)
             y -= 20
         }
+    }
+
+    private func drawAgents(_ s: AgentsSummary) {
+        let c = contentRect()
+        let head = s.count == 0 ? "AGENTS" : "AGENTS · \(s.count) NEED YOU"
+        draw(head, at: NSPoint(x: c.minX, y: bounds.maxY - 24), font: mono(10, .semibold), color: dim, kern: 1.4)
+
+        if s.needsAttention.isEmpty {
+            draw("All agents clear", at: NSPoint(x: c.minX, y: bounds.maxY - 52),
+                 font: sans(14, .medium), color: dim)
+            return
+        }
+
+        let codexBlue = NSColor(red: 0.36, green: 0.62, blue: 0.90, alpha: 1)
+        var y = bounds.maxY - 46
+        for it in s.needsAttention.prefix(4) {
+            (it.engine == "codex" ? codexBlue : amber).setFill()
+            NSBezierPath(ovalIn: NSRect(x: c.minX + 1, y: y - 2, width: 7, height: 7)).fill()
+            draw(truncate(it.label, w: c.width - 24, font: sans(13, .semibold)),
+                 at: NSPoint(x: c.minX + 16, y: y - 6), font: sans(13, .semibold), color: .white)
+            let repoPart = it.repo.isEmpty ? "" : "\(it.repo) · "
+            draw("\(repoPart)\(it.engine) · \(it.state)\(ago(it.since))",
+                 at: NSPoint(x: c.minX + 16, y: y - 22), font: mono(10, .regular), color: dim)
+            y -= 42
+        }
+    }
+
+    private func ago(_ sinceMs: Double?) -> String {
+        guard let ms = sinceMs else { return "" }
+        let secs = Int(Date().timeIntervalSince1970 - ms / 1000)
+        if secs < 60 { return " · now" }
+        let m = secs / 60
+        if m < 60 { return " · \(m)m" }
+        return " · \(m / 60)h\(m % 60)m"
     }
 
     private func drawSimple(_ kicker: String, _ title: String, _ meta: String) {
