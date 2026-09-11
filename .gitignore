@@ -1,0 +1,17 @@
+# Build output
+.build/
+app/.build/
+*.app
+DerivedData/
+*.xcuserstate
+*.tsbuildinfo
+
+# macOS
+.DS_Store
+
+# Real secret denylist — GITIGNORED, never committed. Only the .example ships.
+.secret-strings
+
+# Local codesigning identity override, scratch, logs
+.env
+*.log

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Block any commit whose staged content contains personal/sensitive info.
+# Logic lives in tools/check-secrets.sh; this is just glue. Install into a
+# fresh clone with tools/install-hooks.sh. Bypass: git commit --no-verify.
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+git diff --cached --no-color | "$ROOT/tools/check-secrets.sh"
