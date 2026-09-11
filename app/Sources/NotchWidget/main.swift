@@ -61,9 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 MeetingCard(id: "m3", title: "Design review", time: "15:00 – 15:30 · in 5h", sender: "", urgency: .calm),
             ]
             meetingCount = mock.count
-            carousel.pages = [.meetings(mock),
-                              .simple(kicker: "Now playing", title: "Midnight City", meta: "M83 · 1:42 / 4:03"),
-                              .simple(kicker: "Important mail", title: "Contract draft", meta: "from Alex R.")]
+            carousel.pages = [.meetings(mock)]
             bandView.apply(BandState(left: "Daily RJ", right: "in 3m", urgency: .now))
             lastCards = mock
             applyCollapsedFrame()
@@ -93,9 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func defaultPages() -> [PageContent] {
-        [ .meetings([]),
-          .simple(kicker: "Now playing", title: "Nothing playing", meta: "—"),
-          .simple(kicker: "Important mail", title: "No flagged mail", meta: "—") ]
+        [ .meetings([]) ]
     }
 
     private func refresh() {
