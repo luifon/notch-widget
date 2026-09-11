@@ -17,6 +17,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var acknowledged: Set<String> = []
     private var flashTimer: Timer?
 
+    private let finance = FinanceSource()
+    private var financeSummary: FinanceSummary?
+    private var financeTimer: Timer?
+    private var mockMode = false
+
     private let expandedWidth: CGFloat = 470
     private let barExtra: CGFloat = 2            // bottom edge hangs below the notch
     private var bandHeight: CGFloat { geo.topInset + barExtra }
@@ -55,19 +60,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyCollapsedFrame()
 
         if ProcessInfo.processInfo.environment["NOTCH_MOCK"] == "1" {
+            mockMode = true
             let mock: [MeetingCard] = [
                 MeetingCard(id: "m1", title: "Daily RJ", time: "10:00 – 10:30 · in 3m", sender: "Rafael J.", urgency: .now),
                 MeetingCard(id: "m2", title: "Client sync — a longer title that should truncate", time: "11:00 – 11:45 · in 12m", sender: "Marina Alves", urgency: .soon),
                 MeetingCard(id: "m3", title: "Design review", time: "15:00 – 15:30 · in 5h", sender: "", urgency: .calm),
             ]
             meetingCount = mock.count
-            carousel.pages = [.meetings(mock)]
+            lastCards = mock
+            financeSummary = FinanceSummary(asOf: nil, since: "2026-09-09", netWorth: 1_234_567,
+                liquidNetWorth: 456_789, deltaAbs: 3210, deltaPct: 0.26, movers: [
+                    .init(name: "PETR4", deltaAbs: 1200, deltaPct: 1.8),
+                    .init(name: "BTC", deltaAbs: -800, deltaPct: -0.9),
+                    .init(name: "IVVB11", deltaAbs: 600, deltaPct: 0.4),
+                ])
+            rebuildPages()
             bandView.apply(BandState(left: "Daily RJ", right: "in 3m", urgency: .now))
             lastCards = mock
             applyCollapsedFrame()
             updateFlash()
             if ProcessInfo.processInfo.environment["NOTCH_MOCK_EXPAND"] == "1" {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.setExpanded(true) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    self?.setExpanded(true)
+                    if let p = ProcessInfo.processInfo.environment["NOTCH_MOCK_PAGE"], let i = Int(p) {
+                        self?.carousel.index = i
+                    }
+                }
             }
             return
         }
@@ -87,6 +105,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        refreshFinance()
+        financeTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            self?.refreshFinance()
+        }
+
         log("notch widget up")
     }
 
@@ -99,11 +122,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let cards = meetings.meetingCards()
         meetingCount = cards.count
         lastCards = cards
-        var pages = carousel.pages
-        pages[0] = .meetings(cards)
-        carousel.pages = pages
+        rebuildPages()
         if isExpanded { setExpanded(true, force: true) } else { applyCollapsedFrame() }
         updateFlash()
+    }
+
+    /// Compose the carousel pages: meetings always first, finance if we have a
+    /// summary. Preserves the current page index when still valid.
+    private func rebuildPages() {
+        var pages: [PageContent] = [.meetings(lastCards)]
+        if let f = financeSummary { pages.append(.finance(f)) }
+        let keep = min(carousel.index, pages.count - 1)
+        carousel.pages = pages
+        carousel.index = max(0, keep)
+    }
+
+    private func refreshFinance() {
+        guard !mockMode else { return }
+        financeSummary = finance.load()
+        rebuildPages()
     }
 
     // MARK: ≤5-minute flash
@@ -169,6 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setExpanded(_ expanded: Bool, force: Bool = false) {
         guard expanded != isExpanded || force else { return }
         isExpanded = expanded
+        if expanded { refreshFinance() }        // pick up the latest summary on open
         bandView.cornerRadius = expanded ? 0 : 11
 
         let frame: NSRect

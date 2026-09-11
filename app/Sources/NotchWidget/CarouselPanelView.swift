@@ -4,6 +4,7 @@ import QuartzCore
 /// A page in the expanded carousel.
 enum PageContent {
     case meetings([MeetingCard])
+    case finance(FinanceSummary)
     case simple(kicker: String, title: String, meta: String)
 }
 
@@ -40,6 +41,15 @@ final class CarouselPanelView: NSView {
     private let dim = NSColor(white: 0.55, alpha: 1)
     private let amber = NSColor(red: 0.949, green: 0.710, blue: 0.227, alpha: 1)
     private let cardBG = NSColor(red: 0.09, green: 0.09, blue: 0.105, alpha: 1)
+    private let up = NSColor(red: 0.30, green: 0.72, blue: 0.42, alpha: 1)
+    private let down = NSColor(red: 0.85, green: 0.32, blue: 0.29, alpha: 1)
+    private lazy var brl: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.locale = Locale(identifier: "pt_BR")
+        f.maximumFractionDigits = 0
+        return f
+    }()
 
     override var isFlipped: Bool { false }
 
@@ -108,6 +118,7 @@ final class CarouselPanelView: NSView {
 
         switch pages[index] {
         case .meetings(let cards): drawMeetings(cards)
+        case .finance(let s): drawFinance(s)
         case .simple(let k, let t, let m): drawSimple(k, t, m)
         }
 
@@ -164,6 +175,36 @@ final class CarouselPanelView: NSView {
         if hasSender {
             draw(truncate("with \(card.sender)", w: w, font: sans(10, .regular)),
                  at: NSPoint(x: x, y: rect.minY + 9), font: sans(10, .regular), color: u.cardSubtext)
+        }
+    }
+
+    private func drawFinance(_ s: FinanceSummary) {
+        let c = contentRect()
+        draw("NET WORTH", at: NSPoint(x: c.minX, y: bounds.maxY - 24),
+             font: mono(10, .semibold), color: dim, kern: 1.4)
+
+        let nwStr = brl.string(from: NSNumber(value: s.netWorth)) ?? "—"
+        draw(nwStr, at: NSPoint(x: c.minX, y: bounds.maxY - 54), font: sans(21, .bold), color: .white)
+
+        if let dAbs = s.deltaAbs, let dPct = s.deltaPct {
+            let pos = dAbs >= 0
+            let sign = pos ? "+" : "−"
+            let absStr = brl.string(from: NSNumber(value: abs(dAbs))) ?? ""
+            let line = "\(pos ? "▲" : "▼") \(sign)\(absStr)  (\(sign)\(String(format: "%.2f", abs(dPct)))%)"
+            draw(line, at: NSPoint(x: c.minX, y: bounds.maxY - 80), font: mono(12, .medium), color: pos ? up : down)
+        } else {
+            draw("no change yet", at: NSPoint(x: c.minX, y: bounds.maxY - 80),
+                 font: mono(12, .regular), color: dim)
+        }
+
+        var y = bounds.maxY - 108
+        for m in s.movers.prefix(3) {
+            let pos = m.deltaAbs >= 0
+            draw(truncate(m.name, w: c.width - 70, font: sans(11, .regular)),
+                 at: NSPoint(x: c.minX, y: y), font: sans(11, .regular), color: NSColor(white: 0.72, alpha: 1))
+            let pct = "\(pos ? "+" : "−")\(String(format: "%.1f", abs(m.deltaPct)))%"
+            draw(pct, at: NSPoint(x: c.maxX - 52, y: y), font: mono(11, .regular), color: pos ? up : down)
+            y -= 20
         }
     }
 
