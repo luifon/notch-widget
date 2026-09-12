@@ -6,6 +6,7 @@ enum PageContent {
     case meetings([MeetingCard])
     case finance(FinanceSummary)
     case agents(AgentsSummary)
+    case weather(WeatherSummary)
     case simple(kicker: String, title: String, meta: String)
 }
 
@@ -37,6 +38,9 @@ final class CarouselPanelView: NSView {
         let c = max(1, min(4, n))
         return headerH + CGFloat(c) * 42 + dotsH
     }
+
+    /// Fixed height the weather page needs.
+    static let weatherHeight: CGFloat = 130
 
     /// Called with a meeting id when its card is clicked (used to acknowledge
     /// an alerting meeting and stop the flash).
@@ -139,6 +143,7 @@ final class CarouselPanelView: NSView {
         case .meetings(let cards): drawMeetings(cards)
         case .finance(let s): drawFinance(s)
         case .agents(let a): drawAgents(a)
+        case .weather(let w): drawWeather(w)
         case .simple(let k, let t, let m): drawSimple(k, t, m)
         }
 
@@ -265,6 +270,22 @@ final class CarouselPanelView: NSView {
         let m = secs / 60
         if m < 60 { return " · \(m)m" }
         return " · \(m / 60)h\(m % 60)m"
+    }
+
+    private func drawWeather(_ w: WeatherSummary) {
+        let c = contentRect()
+        draw(w.place.uppercased(), at: NSPoint(x: c.minX, y: bounds.maxY - 24),
+             font: mono(10, .semibold), color: dim, kern: 1.2)
+
+        let tempFont = sans(30, .bold)
+        let temp = "\(Int(round(w.tempC)))°"
+        draw(temp, at: NSPoint(x: c.minX, y: bounds.maxY - 60), font: tempFont, color: .white)
+        let tw = (temp as NSString).size(withAttributes: [.font: tempFont]).width
+        draw(w.label, at: NSPoint(x: c.minX + tw + 16, y: bounds.maxY - 52),
+             font: sans(15, .medium), color: NSColor(white: 0.8, alpha: 1))
+
+        let sub = "feels \(Int(round(w.feelsC)))°   ·   H \(Int(round(w.maxC)))°   L \(Int(round(w.minC)))°"
+        draw(sub, at: NSPoint(x: c.minX, y: bounds.maxY - 88), font: mono(12, .regular), color: dim)
     }
 
     private func drawSimple(_ kicker: String, _ title: String, _ meta: String) {

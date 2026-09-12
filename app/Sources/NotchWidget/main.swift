@@ -21,6 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var financeSummary: FinanceSummary?
     private let agentsSource = AgentsSource()
     private var agentsSummary: AgentsSummary?
+    private let weather = WeatherSource()
+    private var weatherSummary: WeatherSummary?
+    private var weatherTimer: Timer?
     private var externalTimer: Timer?
     private var mockMode = false
 
@@ -83,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .init(id: "wt2", label: "Fix the migration", repo: "toolkit", engine: "codex", state: "interrupted", since: nowMs - 1_500_000),
                 .init(id: "wt3", label: "Draft release notes", repo: "demo-app", engine: "claude", state: "finished", since: nowMs - 60_000),
             ])
+            weatherSummary = WeatherSummary(tempC: 24.6, feelsC: 25.9, code: 3, maxC: 29.6, minC: 17.8, place: "São Paulo")
             rebuildPages()
             bandView.apply(BandState(left: "Daily RJ", right: "in 3m", urgency: .now))
             lastCards = mock
@@ -118,6 +122,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         externalTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.refreshExternal()
         }
+        refreshWeather()
+        weatherTimer = Timer.scheduledTimer(withTimeInterval: 1200, repeats: true) { [weak self] _ in
+            self?.refreshWeather()
+        }
 
         log("notch widget up")
     }
@@ -141,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func rebuildPages() {
         var pages: [PageContent] = [.meetings(lastCards)]
         if let a = agentsSummary { pages.append(.agents(a)) }
+        if let w = weatherSummary { pages.append(.weather(w)) }
         if let f = financeSummary { pages.append(.finance(f)) }
         let keep = min(carousel.index, pages.count - 1)
         carousel.pages = pages
@@ -152,6 +161,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         financeSummary = finance.load()
         agentsSummary = agentsSource.load()
         rebuildPages()
+    }
+
+    private func refreshWeather() {
+        guard !mockMode else { return }
+        weather.fetch { [weak self] summary in
+            guard let self, let summary else { return }
+            self.weatherSummary = summary
+            self.rebuildPages()
+        }
     }
 
     /// Acknowledge an agent worktree: record it (the emitter stops flagging it)
@@ -235,6 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             carousel.isHidden = false
             var ph = CarouselPanelView.panelHeight(meetingCards: meetingCount)
             if let a = agentsSummary { ph = max(ph, CarouselPanelView.agentsHeight(a.needsAttention.count)) }
+            if weatherSummary != nil { ph = max(ph, CarouselPanelView.weatherHeight) }
             if financeSummary != nil { ph = max(ph, CarouselPanelView.financeHeight) }
             let (f, gapMinX) = geo.expandedFrame(width: expandedWidth, panelHeight: ph, barExtra: barExtra)
             bandView.gapMinX = gapMinX
