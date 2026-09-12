@@ -17,7 +17,7 @@ final class CarouselPanelView: NSView {
     var index: Int = 0 { didSet { needsDisplay = true } }
     var cornerRadius: CGFloat = 18
 
-    static let headerH: CGFloat = 34
+    static let headerH: CGFloat = 44
     static let cardH: CGFloat = 64
     static let cardGap: CGFloat = 10
     static let dotsH: CGFloat = 28
@@ -237,10 +237,11 @@ final class CarouselPanelView: NSView {
     // MARK: components
 
     private func tag(_ label: String, right: String? = nil) {
+        // Header bar: tag pill + optional count, with a full-width divider below.
         let f = Theme.mono(9.5, .semibold)
         let a = NSAttributedString(string: label, attributes: [.font: f, .foregroundColor: Theme.amber, .kern: 1.3])
         let sz = a.size(); let padX: CGFloat = 7
-        let r = NSRect(x: 12, y: bounds.maxY - 25, width: ceil(sz.width) + padX * 2, height: 17)
+        let r = NSRect(x: 12, y: bounds.maxY - 26, width: ceil(sz.width) + padX * 2, height: 17)
         Theme.amber.withAlphaComponent(0.09).setFill(); NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5).fill()
         let b = NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5); b.lineWidth = 1; Theme.amber.withAlphaComponent(0.4).setStroke(); b.stroke()
         a.draw(at: NSPoint(x: r.minX + padX, y: r.midY - sz.height / 2))
@@ -248,6 +249,9 @@ final class CarouselPanelView: NSView {
             let rs = NSAttributedString(string: right, attributes: [.font: Theme.mono(10), .foregroundColor: Theme.faint])
             let z = rs.size(); rs.draw(at: NSPoint(x: bounds.maxX - 14 - z.width, y: r.midY - z.height / 2))
         }
+        let divY = bounds.maxY - 36
+        let d = NSBezierPath(); d.move(to: NSPoint(x: 0, y: divY)); d.line(to: NSPoint(x: bounds.width, y: divY)); d.lineWidth = 1
+        Theme.border.setStroke(); d.stroke()
     }
 
     private func tile(_ r: NSRect) {
