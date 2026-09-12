@@ -11,6 +11,7 @@ struct FinanceSummary: Codable {
     let deltaAbs: Double?
     let deltaPct: Double?
     let movers: [Mover]
+    let series: [Double]?   // recent net-worth values for the sparkline
 
     struct Mover: Codable {
         let name: String

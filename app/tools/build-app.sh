@@ -14,6 +14,11 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/NotchWidget "$APP/Contents/MacOS/NotchWidget"
 
+# Bundle resources (engine icons) so Bundle.module resolves inside the .app.
+if [ -d ".build/release/NotchWidget_NotchWidget.bundle" ]; then
+  cp -R ".build/release/NotchWidget_NotchWidget.bundle" "$APP/Contents/Resources/"
+fi
+
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

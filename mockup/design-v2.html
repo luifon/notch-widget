@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NotchWidget — design v2</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0a0a; --surface:#141414; --surface2:#191919; --border:#2a2a2a;
+    --ink:#e5e5e5; --faint:#707070; --amber:#e6b450; --claude:#d97757;
+    --ok:#2fa96b; --warn:#e6b450; --down:#d24b3b; --blue:#4d9fff; --idle:#707070;
+    --mono:'JetBrains Mono','Menlo',monospace;
+  }
+  *{box-sizing:border-box;font-variant-numeric:tabular-nums}
+  body{margin:0;background:#040404;color:var(--ink);font-family:var(--mono);
+       padding:46px 28px 90px;line-height:1.4}
+  h1{font-size:13px;color:var(--faint);font-weight:500;letter-spacing:.16em;
+     text-transform:uppercase;margin:0 0 28px;text-align:center}
+  .lane{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start;justify-content:center;max-width:1200px;margin:0 auto}
+  .cap{font-size:10px;color:var(--faint);letter-spacing:.14em;text-transform:uppercase;text-align:center;margin-top:10px}
+
+  /* the notch panel */
+  .panel{width:340px;background:var(--bg);border:1px solid var(--border);border-top:none;
+         border-radius:0 0 20px 20px;overflow:hidden;position:relative;
+         box-shadow:0 18px 50px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.03)}
+  .panel::before{content:'';position:absolute;inset:0;pointer-events:none;
+         background:radial-gradient(120% 60% at 50% -10%, rgba(230,180,80,.06), transparent 60%)}
+  .tag{position:absolute;top:10px;left:12px;z-index:2;font-size:9.5px;letter-spacing:.14em;
+       color:var(--amber);border:1px solid color-mix(in srgb,var(--amber) 40%,var(--border));
+       background:color-mix(in srgb,var(--amber) 8%,transparent);border-radius:5px;padding:2px 7px}
+  .count{position:absolute;top:10px;right:12px;z-index:2;font-size:10px;color:var(--faint)}
+  .body{padding:34px 14px 16px}
+
+  /* tiles */
+  .tile{background:var(--surface);border:1px solid var(--border);border-radius:11px;
+        padding:11px 12px;position:relative;overflow:hidden}
+  .tile+.tile{margin-top:9px}
+  .accent{position:absolute;left:0;top:0;bottom:0;width:3px}
+
+  /* AGENTS */
+  .agent{display:flex;gap:11px;align-items:center}
+  .avatar{width:30px;height:30px;border-radius:9px;flex:none;display:grid;place-items:center;
+          border:1px solid var(--border);background:var(--surface2)}
+  .ic{width:17px;height:17px;display:block}
+  .ic.claude{background:var(--claude);-webkit-mask:url(claude.svg) center/contain no-repeat;mask:url(claude.svg) center/contain no-repeat}
+  .ic.openai{background:var(--ink);-webkit-mask:url(openai.svg) center/contain no-repeat;mask:url(openai.svg) center/contain no-repeat}
+  .agent .name{font-size:13px;font-weight:600;color:var(--ink);line-height:1.25}
+  .agent .sub{font-size:10.5px;color:var(--faint);margin-top:2px}
+  .chip{border:1px solid var(--border);border-radius:5px;padding:1px 5px;font-size:9.5px;color:var(--faint)}
+  .pill{font-size:9.5px;font-weight:600;border-radius:5px;padding:2px 7px;margin-left:auto;letter-spacing:.03em}
+  .pill.review{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)}
+  .pill.appr{color:var(--down);background:color-mix(in srgb,var(--down) 14%,transparent);border:1px solid color-mix(in srgb,var(--down) 40%,transparent)}
+  .pill.done{color:var(--ok);background:color-mix(in srgb,var(--ok) 14%,transparent);border:1px solid color-mix(in srgb,var(--ok) 40%,transparent)}
+
+  /* WEATHER */
+  .wx-top{display:flex;align-items:center;gap:14px}
+  .wx-temp{font-size:46px;font-weight:700;letter-spacing:-.02em;line-height:.9}
+  .wx-cond{font-size:14px;color:var(--ink)}
+  .wx-place{font-size:10.5px;color:var(--faint);margin-top:3px}
+  .wx-sub{display:flex;gap:16px;font-size:11px;color:var(--faint);margin-top:12px}
+  .wx-sub b{color:var(--ink);font-weight:600}
+  .wx-hours{display:flex;justify-content:space-between;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
+  .wx-hours .h{text-align:center;font-size:10px;color:var(--faint)}
+  .wx-hours .h b{display:block;color:var(--ink);font-size:11px;margin-top:5px}
+
+  /* FINANCE */
+  .nw{font-size:34px;font-weight:700;letter-spacing:-.01em;line-height:1}
+  .delta{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
+         border-radius:6px;padding:3px 8px;margin-top:9px}
+  .delta.up{color:var(--ok);background:color-mix(in srgb,var(--ok) 13%,transparent)}
+  .delta.down{color:var(--down);background:color-mix(in srgb,var(--down) 13%,transparent)}
+  .liq{font-size:11px;color:var(--faint);margin-top:8px}
+  .spark{margin-top:10px}
+  .mover{display:flex;align-items:center;gap:10px;font-size:11.5px;margin-top:9px}
+  .mover .tk{color:var(--ink);width:58px}
+  .bar{flex:1;height:6px;background:var(--surface2);border-radius:3px;position:relative;overflow:hidden}
+  .bar i{position:absolute;top:0;bottom:0;border-radius:3px}
+  .mover .pct{width:46px;text-align:right}
+
+  /* MEETINGS */
+  .mtg .name{font-size:13.5px;font-weight:600}
+  .mtg .time{font-size:11px;color:var(--faint);margin-top:3px}
+  .mtg .with{font-size:10px;color:#8a8a8a;margin-top:5px}
+
+  /* NEWS */
+  .news .h{font-size:13px;font-weight:600;line-height:1.3}
+  .news .src{font-size:10px;color:var(--faint);margin-top:5px;display:flex;align-items:center;gap:6px}
+  .dot{width:7px;height:7px;border-radius:50%;flex:none}
+
+  /* collapsed bar */
+  .barrow{display:flex;gap:14px;justify-content:center;margin:0 auto 40px;flex-wrap:wrap;max-width:1000px}
+  .collapsed{display:inline-flex;align-items:center;gap:8px;background:#000;color:var(--ink);
+     border:1px solid color-mix(in srgb,var(--blue) 55%,transparent);
+     border-radius:0 0 12px 12px;padding:6px 14px;font-size:12px}
+  .collapsed.soon{background:var(--warn);color:#1a1400;border-color:transparent}
+  .collapsed.now{background:var(--down);color:#fff;border-color:transparent}
+</style>
+</head>
+<body>
+<h1>NotchWidget · design v2 · nucleus terminal×tiles</h1>
+
+<div class="barrow">
+  <span class="collapsed">◷ <b>Daily sync</b> · in 2h &nbsp; <span style="color:var(--blue)">›</span></span>
+  <span class="collapsed soon">◷ <b>Standup</b> · in 14m</span>
+  <span class="collapsed now">● <b>1:1</b> · live</span>
+</div>
+
+<div class="lane">
+
+  <!-- AGENTS -->
+  <div>
+  <div class="panel"><span class="tag">AGENTS</span><span class="count">3 need you</span>
+    <div class="body">
+      <div class="tile agent">
+        <div class="avatar"><i class="ic claude"></i></div>
+        <div><div class="name">Review the diff</div><div class="sub"><span class="chip">acme-web</span> · 5m</div></div>
+        <span class="pill review">review</span>
+      </div>
+      <div class="tile agent">
+        <div class="avatar"><i class="ic openai"></i></div>
+        <div><div class="name">Fix the migration</div><div class="sub"><span class="chip">toolkit</span> · 25m</div></div>
+        <span class="pill appr">approve</span>
+      </div>
+      <div class="tile agent">
+        <div class="avatar"><i class="ic claude"></i></div>
+        <div><div class="name">Draft release notes</div><div class="sub"><span class="chip">demo-app</span> · 1m</div></div>
+        <span class="pill done">finished</span>
+      </div>
+    </div>
+  </div>
+  <div class="cap">Agents — engine avatars + state pills</div>
+  </div>
+
+  <!-- WEATHER -->
+  <div>
+  <div class="panel"><span class="tag">WEATHER</span>
+    <div class="body">
+      <div class="wx-top">
+        <div id="wx-icon"></div>
+        <div>
+          <div class="wx-temp">25°</div>
+          <div class="wx-place">Home city</div>
+        </div>
+        <div style="margin-left:auto;text-align:right"><div class="wx-cond">Partly cloudy</div></div>
+      </div>
+      <div class="wx-sub"><span>feels <b>26°</b></span><span>H <b>30°</b></span><span>L <b>18°</b></span></div>
+      <div class="wx-hours">
+        <div class="h">15h ☀ <b>26°</b></div><div class="h">17h ⛅ <b>24°</b></div>
+        <div class="h">19h ☁ <b>21°</b></div><div class="h">21h ☁ <b>19°</b></div>
+        <div class="h">23h 🌙 <b>18°</b></div>
+      </div>
+    </div>
+  </div>
+  <div class="cap">Weather — icon + hourly strip</div>
+  </div>
+
+  <!-- FINANCE -->
+  <div>
+  <div class="panel"><span class="tag">NET WORTH</span>
+    <div class="body">
+      <div class="nw">R$ 1.234.567</div>
+      <span class="delta up">▲ +R$ 3.210 &nbsp;+0.26%</span>
+      <div class="liq">Liquid · R$ 456.789</div>
+      <svg class="spark" width="312" height="46" id="spark"></svg>
+      <div class="mover"><span class="tk">PETR4</span><div class="bar"><i style="left:50%;width:22%;background:var(--ok)"></i></div><span class="pct" style="color:var(--ok)">+1.8%</span></div>
+      <div class="mover"><span class="tk">BTC</span><div class="bar"><i style="right:50%;width:12%;background:var(--down)"></i></div><span class="pct" style="color:var(--down)">−0.9%</span></div>
+      <div class="mover"><span class="tk">IVVB11</span><div class="bar"><i style="left:50%;width:6%;background:var(--ok)"></i></div><span class="pct" style="color:var(--ok)">+0.4%</span></div>
+    </div>
+  </div>
+  <div class="cap">Net worth — sparkline + mover bars</div>
+  </div>
+
+  <!-- MEETINGS -->
+  <div>
+  <div class="panel"><span class="tag">NEXT MEETINGS</span>
+    <div class="body">
+      <div class="tile mtg"><div class="accent" style="background:var(--down)"></div>
+        <div class="name">Daily sync</div><div class="time">10:00 – 10:30 · <span style="color:var(--down)">live</span></div><div class="with">with Alex R.</div></div>
+      <div class="tile mtg"><div class="accent" style="background:var(--warn)"></div>
+        <div class="name">Design review — layout pass</div><div class="time">11:00 – 11:45 · in 12m</div><div class="with">with Marina A.</div></div>
+      <div class="tile mtg"><div class="accent" style="background:var(--blue)"></div>
+        <div class="name">1:1</div><div class="time">15:00 – 15:30 · in 5h</div></div>
+    </div>
+  </div>
+  <div class="cap">Meetings — accent + state color on the background</div>
+  </div>
+
+  <!-- NEWS -->
+  <div>
+  <div class="panel"><span class="tag">NEWS</span><span class="count">8 today</span>
+    <div class="body">
+      <div class="tile news"><div class="h">A headline that matters, scored high by the fetcher</div>
+        <div class="src"><span class="dot" style="background:var(--amber)"></span>Ars Technica · 0.82</div></div>
+      <div class="tile news"><div class="h">Second-ranked story of the day</div>
+        <div class="src"><span class="dot" style="background:var(--blue)"></span>The Verge · 0.74</div></div>
+    </div>
+  </div>
+  <div class="cap">News — source dot + score</div>
+  </div>
+
+</div>
+
+<script>
+// ---- weather icon (sun behind cloud) ----
+document.getElementById('wx-icon').innerHTML=`
+<svg width="56" height="56" viewBox="0 0 56 56">
+  <defs><radialGradient id="sun" cx="50%" cy="50%"><stop offset="0%" stop-color="#f4c96b"/><stop offset="100%" stop-color="#e6b450"/></radialGradient></defs>
+  <circle cx="22" cy="20" r="9" fill="url(#sun)"/>
+  ${Array.from({length:8}).map((_,i)=>{const a=i/8*Math.PI*2;return `<line x1="${22+Math.cos(a)*12}" y1="${20+Math.sin(a)*12}" x2="${22+Math.cos(a)*15}" y2="${20+Math.sin(a)*15}" stroke="#e6b450" stroke-width="2" stroke-linecap="round"/>`}).join('')}
+  <path d="M20 40 a8 8 0 0 1 8-8 a10 10 0 0 1 19 2 a7 7 0 0 1 -1 14 H22 a7 7 0 0 1 -2 -8 z" fill="#3a3a3d" stroke="#4a4a4d" stroke-width="1"/>
+</svg>`;
+
+// ---- net-worth sparkline (thin 2px line + soft fill, end dot) ----
+(()=>{
+  const W=312,H=46,n=24,pad=3;
+  const pts=[]; let v=100; for(let i=0;i<n;i++){v+=(Math.sin(i/2)+ (Math.random()-.4))*3; pts.push(v);}
+  const mn=Math.min(...pts),mx=Math.max(...pts);
+  const X=i=>pad+i*(W-2*pad)/(n-1);
+  const Y=val=>H-pad-(val-mn)/(mx-mn||1)*(H-2*pad);
+  let d=`M ${X(0)} ${Y(pts[0])}`; pts.forEach((p,i)=>d+=` L ${X(i)} ${Y(p)}`);
+  const area=d+` L ${X(n-1)} ${H} L ${X(0)} ${H} Z`;
+  document.getElementById('spark').innerHTML=`
+    <defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e6b450" stop-opacity=".22"/><stop offset="100%" stop-color="#e6b450" stop-opacity="0"/></linearGradient></defs>
+    <path d="${area}" fill="url(#fill)"/>
+    <path d="${d}" fill="none" stroke="#e6b450" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="${X(n-1)}" cy="${Y(pts[n-1])}" r="3" fill="#e6b450"/>`;
+})();
+</script>
+</body>
+</html>

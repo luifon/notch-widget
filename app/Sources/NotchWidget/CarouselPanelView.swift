@@ -10,15 +10,13 @@ enum PageContent {
     case simple(kicker: String, title: String, meta: String)
 }
 
-/// The panel that drops below the notch when expanded. One page at a time;
-/// click the left/right edge (or the arrows) to page. Black with rounded bottom
-/// corners so it joins the collapsed band above it.
+/// The panel that drops below the notch. Nucleus terminal×tiles look: near-black
+/// panel, surface tiles, amber corner tag, mono type. One page at a time.
 final class CarouselPanelView: NSView {
     var pages: [PageContent] = [] { didSet { clampIndex(); needsDisplay = true } }
     var index: Int = 0 { didSet { needsDisplay = true } }
-    var cornerRadius: CGFloat = 16
+    var cornerRadius: CGFloat = 18
 
-    // Shared layout constants (the app uses these to size the window).
     static let headerH: CGFloat = 34
     static let cardH: CGFloat = 64
     static let cardGap: CGFloat = 10
@@ -29,24 +27,12 @@ final class CarouselPanelView: NSView {
         let c = max(1, min(3, n))
         return headerH + CGFloat(c) * cardH + CGFloat(c - 1) * cardGap + dotsH
     }
+    static func agentsHeight(_ n: Int) -> CGFloat { headerH + CGFloat(max(1, min(4, n))) * 52 + dotsH }
+    static let financeHeight: CGFloat = 214
+    static let weatherHeight: CGFloat = 150
 
-    /// Fixed height the finance page needs (NW + delta + liquid + 3 movers).
-    static let financeHeight: CGFloat = 200
-
-    /// Height the agents page needs for `n` rows (up to 4 shown).
-    static func agentsHeight(_ n: Int) -> CGFloat {
-        let c = max(1, min(4, n))
-        return headerH + CGFloat(c) * 42 + dotsH
-    }
-
-    /// Fixed height the weather page needs.
-    static let weatherHeight: CGFloat = 130
-
-    /// Called with a meeting id when its card is clicked (used to acknowledge
-    /// an alerting meeting and stop the flash).
     var onCardClick: ((String) -> Void)?
     private var cardHits: [(rect: NSRect, id: String)] = []
-    /// Called with a worktree id when its agent row is clicked (acknowledge).
     var onAgentClick: ((String) -> Void)?
     private var agentHits: [(rect: NSRect, id: String)] = []
 
@@ -55,65 +41,36 @@ final class CarouselPanelView: NSView {
     private var leftTA: NSTrackingArea?
     private var rightTA: NSTrackingArea?
 
-    private let dim = NSColor(white: 0.55, alpha: 1)
-    private let amber = NSColor(red: 0.949, green: 0.710, blue: 0.227, alpha: 1)
-    private let cardBG = NSColor(red: 0.09, green: 0.09, blue: 0.105, alpha: 1)
-    private let up = NSColor(red: 0.30, green: 0.72, blue: 0.42, alpha: 1)
-    private let down = NSColor(red: 0.85, green: 0.32, blue: 0.29, alpha: 1)
-    private lazy var brl: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.locale = Locale(identifier: "pt_BR")
-        f.maximumFractionDigits = 0
-        return f
-    }()
-
     override var isFlipped: Bool { false }
 
-    // MARK: hover on arrows
+    // MARK: arrow hover
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         [leftTA, rightTA].forEach { if let t = $0 { removeTrackingArea(t) } }
         let z = Self.arrowZone
         let l = NSTrackingArea(rect: NSRect(x: 0, y: 0, width: z, height: bounds.height),
-                               options: [.mouseEnteredAndExited, .activeAlways],
-                               owner: self, userInfo: ["side": "left"])
+                               options: [.mouseEnteredAndExited, .activeAlways], owner: self, userInfo: ["side": "left"])
         let r = NSTrackingArea(rect: NSRect(x: bounds.maxX - z, y: 0, width: z, height: bounds.height),
-                               options: [.mouseEnteredAndExited, .activeAlways],
-                               owner: self, userInfo: ["side": "right"])
+                               options: [.mouseEnteredAndExited, .activeAlways], owner: self, userInfo: ["side": "right"])
         addTrackingArea(l); addTrackingArea(r); leftTA = l; rightTA = r
     }
-
-    override func mouseEntered(with event: NSEvent) {
-        guard let side = event.trackingArea?.userInfo?["side"] as? String else { return }
-        hoveredArrow = (side == "left") ? .left : .right
-        NSCursor.pointingHand.set()
-        needsDisplay = true
+    override func mouseEntered(with e: NSEvent) {
+        guard let s = e.trackingArea?.userInfo?["side"] as? String else { return }
+        hoveredArrow = (s == "left") ? .left : .right; NSCursor.pointingHand.set(); needsDisplay = true
     }
-    override func mouseExited(with event: NSEvent) {
-        hoveredArrow = nil
-        NSCursor.arrow.set()
-        needsDisplay = true
-    }
+    override func mouseExited(with e: NSEvent) { hoveredArrow = nil; NSCursor.arrow.set(); needsDisplay = true }
 
-    // MARK: paging
+    // MARK: clicks
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         if pages.count > 1 && p.x < Self.arrowZone { page(-1); return }
         if pages.count > 1 && p.x > bounds.maxX - Self.arrowZone { page(1); return }
-        // click on a meeting card → acknowledge it
-        if let hit = cardHits.first(where: { $0.rect.contains(p) }) {
-            onCardClick?(hit.id); return
-        }
-        // click on an agent row → acknowledge it
-        if let hit = agentHits.first(where: { $0.rect.contains(p) }) {
-            onAgentClick?(hit.id)
-        }
+        if let hit = cardHits.first(where: { $0.rect.contains(p) }) { onCardClick?(hit.id); return }
+        if let hit = agentHits.first(where: { $0.rect.contains(p) }) { onAgentClick?(hit.id) }
     }
 
-    /// Page with a horizontal push transition.
     func page(_ delta: Int) {
         guard pages.count > 1 else { return }
         let t = CATransition()
@@ -124,225 +81,277 @@ final class CarouselPanelView: NSView {
         layer?.add(t, forKey: "page")
         index = (index + delta + pages.count) % pages.count
     }
-
     private func clampIndex() {
-        if pages.isEmpty { index = 0 }
-        else if index >= pages.count { index = pages.count - 1 }
+        if pages.isEmpty { index = 0 } else if index >= pages.count { index = pages.count - 1 }
     }
 
-    // MARK: drawing
+    // MARK: draw
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.black.setFill()
+        Theme.bg.setFill()
         bottomRounded(bounds, radius: cornerRadius).fill()
         guard !pages.isEmpty else { return }
+        cardHits.removeAll(); agentHits.removeAll()
 
-        cardHits.removeAll()
-        agentHits.removeAll()
         switch pages[index] {
-        case .meetings(let cards): drawMeetings(cards)
-        case .finance(let s): drawFinance(s)
-        case .agents(let a): drawAgents(a)
-        case .weather(let w): drawWeather(w)
-        case .simple(let k, let t, let m): drawSimple(k, t, m)
+        case .meetings(let cards): tag("NEXT MEETINGS"); drawMeetings(cards)
+        case .finance(let s): tag("NET WORTH"); drawFinance(s)
+        case .agents(let a): tag("AGENTS", right: a.count == 0 ? nil : "\(a.count) need you"); drawAgents(a)
+        case .weather(let w): tag("WEATHER", right: w.place); drawWeather(w)
+        case .simple(let k, let t, let m): tag(k.uppercased()); drawSimple(t, m)
         }
-
         if pages.count > 1 { drawArrowsAndDots() }
     }
 
-    private func contentRect() -> NSRect {
+    private func content() -> NSRect {
         NSRect(x: Self.arrowZone, y: Self.dotsH,
-               width: bounds.width - Self.arrowZone * 2, height: bounds.height - Self.dotsH)
+               width: bounds.width - Self.arrowZone * 2, height: bounds.height - Self.dotsH - 36)
     }
 
+    // MARK: pages
+
     private func drawMeetings(_ cards: [MeetingCard]) {
-        let c = contentRect()
-        draw("NEXT MEETINGS", at: NSPoint(x: c.minX, y: bounds.maxY - 24),
-             font: mono(10, .semibold), color: dim, kern: 1.4)
-
-        if cards.isEmpty {
-            draw("No meetings in the next 18h", at: NSPoint(x: c.minX, y: bounds.maxY - 52),
-                 font: sans(14, .medium), color: dim)
-            return
-        }
-
-        cardHits.removeAll()
+        let c = content()
+        if cards.isEmpty { text("No meetings in the next 18h", NSPoint(x: c.minX, y: bounds.maxY - 60), Theme.mono(13), Theme.faint); return }
         var top = bounds.maxY - Self.headerH
         for card in cards.prefix(3) {
-            let rect = NSRect(x: c.minX, y: top - Self.cardH, width: c.width, height: Self.cardH)
-            drawCard(card, in: rect)
-            cardHits.append((rect, card.id))
+            let r = NSRect(x: c.minX, y: top - Self.cardH, width: c.width, height: Self.cardH)
+            drawMeetingCard(card, r); cardHits.append((r, card.id))
             top -= Self.cardH + Self.cardGap
         }
     }
 
-    private func drawCard(_ card: MeetingCard, in rect: NSRect) {
+    private func drawMeetingCard(_ card: MeetingCard, _ r: NSRect) {
         let u = card.urgency
-        u.cardBackground.setFill()
-        NSBezierPath(roundedRect: rect, xRadius: 9, yRadius: 9).fill()
-
-        // Neutral cards carry the color as a left border; colored cards don't.
-        let hasBorder = u.showsCardBorder
-        if hasBorder {
+        u.cardBackground.setFill(); NSBezierPath(roundedRect: r, xRadius: 11, yRadius: 11).fill()
+        if u.showsCardBorder {   // neutral: blue border
+            let b = NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 11, yRadius: 11)
+            b.lineWidth = 1; Theme.border.setStroke(); b.stroke()
             u.borderColor.setFill()
-            let bar = NSRect(x: rect.minX + 10, y: rect.minY + 10, width: 4, height: rect.height - 20)
-            NSBezierPath(roundedRect: bar, xRadius: 2, yRadius: 2).fill()
+            NSBezierPath(roundedRect: NSRect(x: r.minX + 10, y: r.minY + 12, width: 3, height: r.height - 24), xRadius: 2, yRadius: 2).fill()
         }
-
-        let x = rect.minX + (hasBorder ? 28 : 18)
-        let w = rect.width - x - 16
+        let x = r.minX + (u.showsCardBorder ? 26 : 18); let w = r.width - x - 16
         let hasSender = !card.sender.isEmpty
-        let titleY = hasSender ? rect.maxY - 23 : rect.maxY - 24
-        let timeY  = hasSender ? rect.maxY - 45 : rect.maxY - 46
-        draw(truncate(card.title, w: w, font: sans(13, .semibold)),
-             at: NSPoint(x: x, y: titleY), font: sans(13, .semibold), color: u.cardInk)
-        draw(card.time, at: NSPoint(x: x, y: timeY), font: mono(11, .regular), color: u.cardSubtext)
-        if hasSender {
-            draw(truncate("with \(card.sender)", w: w, font: sans(10, .regular)),
-                 at: NSPoint(x: x, y: rect.minY + 9), font: sans(10, .regular), color: u.cardSubtext)
-        }
-    }
-
-    private func drawFinance(_ s: FinanceSummary) {
-        let c = contentRect()
-        draw("NET WORTH", at: NSPoint(x: c.minX, y: bounds.maxY - 24),
-             font: mono(10, .semibold), color: dim, kern: 1.4)
-
-        let nwStr = brl.string(from: NSNumber(value: s.netWorth)) ?? "—"
-        draw(nwStr, at: NSPoint(x: c.minX, y: bounds.maxY - 54), font: sans(21, .bold), color: .white)
-
-        if let dAbs = s.deltaAbs, let dPct = s.deltaPct {
-            let pos = dAbs >= 0
-            let sign = pos ? "+" : "−"
-            let absStr = brl.string(from: NSNumber(value: abs(dAbs))) ?? ""
-            let line = "\(pos ? "▲" : "▼") \(sign)\(absStr)  (\(sign)\(String(format: "%.2f", abs(dPct)))%)"
-            draw(line, at: NSPoint(x: c.minX, y: bounds.maxY - 80), font: mono(12, .medium), color: pos ? up : down)
-        } else {
-            draw("no change yet", at: NSPoint(x: c.minX, y: bounds.maxY - 80),
-                 font: mono(12, .regular), color: dim)
-        }
-
-        let liq = brl.string(from: NSNumber(value: s.liquidNetWorth)) ?? "—"
-        draw("Liquid  \(liq)", at: NSPoint(x: c.minX, y: bounds.maxY - 104),
-             font: mono(11, .regular), color: NSColor(white: 0.62, alpha: 1))
-
-        var y = bounds.maxY - 134
-        for m in s.movers.prefix(3) {
-            let pos = m.deltaAbs >= 0
-            draw(truncate(m.name, w: c.width - 70, font: sans(11, .regular)),
-                 at: NSPoint(x: c.minX, y: y), font: sans(11, .regular), color: NSColor(white: 0.72, alpha: 1))
-            let pct = "\(pos ? "+" : "−")\(String(format: "%.1f", abs(m.deltaPct)))%"
-            draw(pct, at: NSPoint(x: c.maxX - 52, y: y), font: mono(11, .regular), color: pos ? up : down)
-            y -= 20
-        }
+        text(truncate(card.title, w, Theme.mono(13, .semibold)), NSPoint(x: x, y: r.maxY - 24), Theme.mono(13, .semibold), u.cardInk)
+        text(card.time, NSPoint(x: x, y: r.maxY - 42), Theme.mono(11), u.cardSubtext)
+        if hasSender { text(truncate("with \(card.sender)", w, Theme.mono(10)), NSPoint(x: x, y: r.minY + 10), Theme.mono(10), u.cardSubtext) }
     }
 
     private func drawAgents(_ s: AgentsSummary) {
-        let c = contentRect()
-        let head = s.count == 0 ? "AGENTS" : "AGENTS · \(s.count) NEED YOU"
-        draw(head, at: NSPoint(x: c.minX, y: bounds.maxY - 24), font: mono(10, .semibold), color: dim, kern: 1.4)
-
-        if s.needsAttention.isEmpty {
-            draw("All agents clear", at: NSPoint(x: c.minX, y: bounds.maxY - 52),
-                 font: sans(14, .medium), color: dim)
-            return
-        }
-
-        let codexBlue = NSColor(red: 0.36, green: 0.62, blue: 0.90, alpha: 1)
-        var y = bounds.maxY - 46
+        let c = content()
+        if s.needsAttention.isEmpty { text("All agents clear", NSPoint(x: c.minX, y: bounds.maxY - 60), Theme.mono(13), Theme.faint); return }
+        var top = bounds.maxY - Self.headerH
         for it in s.needsAttention.prefix(4) {
-            (it.engine == "codex" ? codexBlue : amber).setFill()
-            NSBezierPath(ovalIn: NSRect(x: c.minX + 1, y: y - 2, width: 7, height: 7)).fill()
-            draw(truncate(it.label, w: c.width - 24, font: sans(13, .semibold)),
-                 at: NSPoint(x: c.minX + 16, y: y - 6), font: sans(13, .semibold), color: .white)
-            let repoPart = it.repo.isEmpty ? "" : "\(it.repo) · "
-            draw("\(repoPart)\(it.engine) · \(it.state)\(ago(it.since))",
-                 at: NSPoint(x: c.minX + 16, y: y - 22), font: mono(10, .regular), color: dim)
-            agentHits.append((NSRect(x: c.minX, y: y - 30, width: c.width, height: 40), it.id))
-            y -= 42
+            let r = NSRect(x: c.minX, y: top - 46, width: c.width, height: 46)
+            drawAgentTile(it, r); agentHits.append((r, it.id))
+            top -= 52
         }
     }
 
-    private func ago(_ sinceMs: Double?) -> String {
-        guard let ms = sinceMs else { return "" }
-        let secs = Int(Date().timeIntervalSince1970 - ms / 1000)
-        if secs < 60 { return " · now" }
-        let m = secs / 60
-        if m < 60 { return " · \(m)m" }
-        return " · \(m / 60)h\(m % 60)m"
+    private func drawAgentTile(_ it: AgentsSummary.Item, _ r: NSRect) {
+        tile(r)
+        // avatar chip + engine mark
+        let av = NSRect(x: r.minX + 8, y: r.midY - 15, width: 30, height: 30)
+        Theme.surface2.setFill(); NSBezierPath(roundedRect: av, xRadius: 9, yRadius: 9).fill()
+        let b = NSBezierPath(roundedRect: av.insetBy(dx: 0.5, dy: 0.5), xRadius: 9, yRadius: 9); b.lineWidth = 1; Theme.border.setStroke(); b.stroke()
+        if let icon = Icons.engine(it.engine) {
+            icon.draw(in: NSRect(x: av.midX - 8.5, y: av.midY - 8.5, width: 17, height: 17))
+        }
+        let x = r.minX + 48
+        text(truncate(it.label, r.width - 130, Theme.mono(13, .semibold)), NSPoint(x: x, y: r.maxY - 22), Theme.mono(13, .semibold), Theme.ink)
+        // repo chip + ago
+        let repo = it.repo.isEmpty ? "" : it.repo
+        var sx = x
+        if !repo.isEmpty { sx = chip(repo, at: NSPoint(x: x, y: r.minY + 9)) + 6 }
+        text(ago(it.since), NSPoint(x: sx, y: r.minY + 11), Theme.mono(10), Theme.faint)
+        // state pill
+        pill(it.state, color: stateColor(it.state), rightOf: r)
     }
 
     private func drawWeather(_ w: WeatherSummary) {
-        let c = contentRect()
-        draw(w.place.uppercased(), at: NSPoint(x: c.minX, y: bounds.maxY - 24),
-             font: mono(10, .semibold), color: dim, kern: 1.2)
-
-        let tempFont = sans(30, .bold)
+        let c = content()
+        drawWeatherIcon(NSRect(x: c.minX, y: bounds.maxY - 78, width: 52, height: 52), code: w.code)
         let temp = "\(Int(round(w.tempC)))°"
-        draw(temp, at: NSPoint(x: c.minX, y: bounds.maxY - 60), font: tempFont, color: .white)
-        let tw = (temp as NSString).size(withAttributes: [.font: tempFont]).width
-        draw(w.label, at: NSPoint(x: c.minX + tw + 16, y: bounds.maxY - 52),
-             font: sans(15, .medium), color: NSColor(white: 0.8, alpha: 1))
-
-        let sub = "feels \(Int(round(w.feelsC)))°   ·   H \(Int(round(w.maxC)))°   L \(Int(round(w.minC)))°"
-        draw(sub, at: NSPoint(x: c.minX, y: bounds.maxY - 88), font: mono(12, .regular), color: dim)
+        text(temp, NSPoint(x: c.minX + 62, y: bounds.maxY - 68), Theme.mono(34, .bold), Theme.ink)
+        let tw = (temp as NSString).size(withAttributes: [.font: Theme.mono(34, .bold)]).width
+        text(w.label, NSPoint(x: c.minX + 62 + tw + 14, y: bounds.maxY - 56), Theme.mono(14), Theme.ink)
+        // feels / H / L
+        let sub = "feels \(Int(round(w.feelsC)))°     H \(Int(round(w.maxC)))°     L \(Int(round(w.minC)))°"
+        text(sub, NSPoint(x: c.minX, y: bounds.maxY - 104), Theme.mono(12), Theme.faint)
     }
 
-    private func drawSimple(_ kicker: String, _ title: String, _ meta: String) {
-        let c = contentRect()
-        draw(kicker.uppercased(), at: NSPoint(x: c.minX, y: bounds.maxY - 24),
-             font: mono(10, .semibold), color: dim, kern: 1.4)
-        draw(title, at: NSPoint(x: c.minX, y: bounds.maxY - 50), font: sans(16, .semibold), color: .white)
-        draw(meta, at: NSPoint(x: c.minX, y: bounds.maxY - 74), font: mono(12, .regular), color: dim)
+    private func drawFinance(_ s: FinanceSummary) {
+        let c = content()
+        let nw = brl(s.netWorth)
+        text(nw, NSPoint(x: c.minX, y: bounds.maxY - 62), Theme.mono(28, .bold), Theme.ink)
+        // delta pill
+        if let d = s.deltaAbs, let p = s.deltaPct {
+            let up = d >= 0; let col = up ? Theme.ok : Theme.down
+            let s2 = "\(up ? "▲" : "▼") \(up ? "+" : "−")\(brl(abs(d)))  \(up ? "+" : "−")\(String(format: "%.2f", abs(p)))%"
+            let f = Theme.mono(12, .semibold); let sz = (s2 as NSString).size(withAttributes: [.font: f])
+            let pr = NSRect(x: c.minX, y: bounds.maxY - 88, width: sz.width + 16, height: 20)
+            col.withAlphaComponent(0.13).setFill(); NSBezierPath(roundedRect: pr, xRadius: 6, yRadius: 6).fill()
+            text(s2, NSPoint(x: pr.minX + 8, y: pr.midY - sz.height / 2), f, col)
+        }
+        text("Liquid · \(brl(s.liquidNetWorth))", NSPoint(x: c.minX, y: bounds.maxY - 108), Theme.mono(11), Theme.faint)
+        // sparkline
+        if let series = s.series, series.count > 1 {
+            drawSparkline(series, in: NSRect(x: c.minX, y: bounds.maxY - 148, width: c.width, height: 34))
+        }
+        // movers
+        var y = bounds.maxY - 172
+        for m in s.movers.prefix(3) { drawMover(m, at: y, width: c.width, x: c.minX); y -= 22 }
+    }
+
+    private func drawSimple(_ title: String, _ meta: String) {
+        let c = content()
+        text(title, NSPoint(x: c.minX, y: bounds.maxY - 62), Theme.mono(16, .semibold), Theme.ink)
+        text(meta, NSPoint(x: c.minX, y: bounds.maxY - 86), Theme.mono(12), Theme.faint)
+    }
+
+    // MARK: components
+
+    private func tag(_ label: String, right: String? = nil) {
+        let f = Theme.mono(9.5, .semibold)
+        let a = NSAttributedString(string: label, attributes: [.font: f, .foregroundColor: Theme.amber, .kern: 1.3])
+        let sz = a.size(); let padX: CGFloat = 7
+        let r = NSRect(x: 12, y: bounds.maxY - 25, width: ceil(sz.width) + padX * 2, height: 17)
+        Theme.amber.withAlphaComponent(0.09).setFill(); NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5).fill()
+        let b = NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5); b.lineWidth = 1; Theme.amber.withAlphaComponent(0.4).setStroke(); b.stroke()
+        a.draw(at: NSPoint(x: r.minX + padX, y: r.midY - sz.height / 2))
+        if let right {
+            let rs = NSAttributedString(string: right, attributes: [.font: Theme.mono(10), .foregroundColor: Theme.faint])
+            let z = rs.size(); rs.draw(at: NSPoint(x: bounds.maxX - 14 - z.width, y: r.midY - z.height / 2))
+        }
+    }
+
+    private func tile(_ r: NSRect) {
+        Theme.surface.setFill(); NSBezierPath(roundedRect: r, xRadius: 11, yRadius: 11).fill()
+        let b = NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 11, yRadius: 11); b.lineWidth = 1
+        Theme.border.setStroke(); b.stroke()
+    }
+
+    @discardableResult
+    private func chip(_ s: String, at p: NSPoint) -> CGFloat {
+        let f = Theme.mono(9.5); let a = NSAttributedString(string: s, attributes: [.font: f, .foregroundColor: Theme.faint])
+        let sz = a.size(); let padX: CGFloat = 5
+        let r = NSRect(x: p.x, y: p.y - 2, width: sz.width + padX * 2, height: sz.height + 4)
+        let b = NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5); b.lineWidth = 1; Theme.border.setStroke(); b.stroke()
+        a.draw(at: NSPoint(x: r.minX + padX, y: r.minY + 2))
+        return r.maxX
+    }
+
+    private func pill(_ s: String, color: NSColor, rightOf r: NSRect) {
+        let f = Theme.mono(9.5, .semibold); let a = NSAttributedString(string: s, attributes: [.font: f, .foregroundColor: color])
+        let sz = a.size(); let padX: CGFloat = 7
+        let pr = NSRect(x: r.maxX - 12 - sz.width - padX * 2, y: r.midY - 9, width: sz.width + padX * 2, height: 18)
+        color.withAlphaComponent(0.14).setFill(); NSBezierPath(roundedRect: pr, xRadius: 5, yRadius: 5).fill()
+        let b = NSBezierPath(roundedRect: pr, xRadius: 5, yRadius: 5); b.lineWidth = 1; color.withAlphaComponent(0.4).setStroke(); b.stroke()
+        a.draw(at: NSPoint(x: pr.minX + padX, y: pr.midY - sz.height / 2))
+    }
+
+    private func stateColor(_ state: String) -> NSColor {
+        switch state {
+        case "needs approval": return Theme.down
+        case "finished": return Theme.ok
+        case "review": return Theme.warn
+        default: return Theme.faint
+        }
+    }
+
+    private func drawMover(_ m: FinanceSummary.Mover, at y: CGFloat, width: CGFloat, x: CGFloat) {
+        text(truncate(m.name, 70, Theme.mono(11)), NSPoint(x: x, y: y), Theme.mono(11), Theme.ink)
+        let up = m.deltaAbs >= 0; let col = up ? Theme.ok : Theme.down
+        let barX = x + 66, barW = width - 66 - 52, barMid = barX + barW / 2
+        let track = NSRect(x: barX, y: y + 2, width: barW, height: 6)
+        Theme.surface2.setFill(); NSBezierPath(roundedRect: track, xRadius: 3, yRadius: 3).fill()
+        let frac = min(0.5, abs(m.deltaPct) / 6)   // scale: 3% ≈ full half
+        let len = barW / 2 * frac
+        let fill = up ? NSRect(x: barMid, y: y + 2, width: len, height: 6) : NSRect(x: barMid - len, y: y + 2, width: len, height: 6)
+        col.setFill(); NSBezierPath(roundedRect: fill, xRadius: 3, yRadius: 3).fill()
+        let pct = "\(up ? "+" : "−")\(String(format: "%.1f", abs(m.deltaPct)))%"
+        let a = NSAttributedString(string: pct, attributes: [.font: Theme.mono(11), .foregroundColor: col])
+        a.draw(at: NSPoint(x: x + width - a.size().width, y: y))
+    }
+
+    private func drawSparkline(_ series: [Double], in rect: NSRect) {
+        let mn = series.min()!, mx = series.max()!, span = (mx - mn) == 0 ? 1 : (mx - mn)
+        let n = series.count, pad: CGFloat = 2
+        func X(_ i: Int) -> CGFloat { rect.minX + pad + CGFloat(i) * (rect.width - 2 * pad) / CGFloat(n - 1) }
+        func Y(_ v: Double) -> CGFloat { rect.minY + pad + CGFloat((v - mn) / span) * (rect.height - 2 * pad) }
+        let line = NSBezierPath(); line.move(to: NSPoint(x: X(0), y: Y(series[0])))
+        for i in 1..<n { line.line(to: NSPoint(x: X(i), y: Y(series[i]))) }
+        // soft fill under the line
+        let fill = line.copy() as! NSBezierPath
+        fill.line(to: NSPoint(x: X(n - 1), y: rect.minY)); fill.line(to: NSPoint(x: X(0), y: rect.minY)); fill.close()
+        Theme.amber.withAlphaComponent(0.16).setFill(); fill.fill()
+        line.lineWidth = 2; line.lineJoinStyle = .round; Theme.amber.setStroke(); line.stroke()
+        let end = NSRect(x: X(n - 1) - 3, y: Y(series[n - 1]) - 3, width: 6, height: 6)
+        Theme.amber.setFill(); NSBezierPath(ovalIn: end).fill()
+    }
+
+    private func drawWeatherIcon(_ r: NSRect, code: Int) {
+        // sun
+        let sunR: CGFloat = 11, sc = NSPoint(x: r.minX + 16, y: r.maxY - 16)
+        for i in 0..<8 {
+            let a = CGFloat(i) / 8 * .pi * 2
+            let p = NSBezierPath()
+            p.move(to: NSPoint(x: sc.x + cos(a) * (sunR + 3), y: sc.y + sin(a) * (sunR + 3)))
+            p.line(to: NSPoint(x: sc.x + cos(a) * (sunR + 7), y: sc.y + sin(a) * (sunR + 7)))
+            p.lineWidth = 2; p.lineCapStyle = .round; Theme.amber.setStroke(); p.stroke()
+        }
+        Theme.amber.setFill(); NSBezierPath(ovalIn: NSRect(x: sc.x - sunR, y: sc.y - sunR, width: sunR * 2, height: sunR * 2)).fill()
+        // cloud (a couple of overlapping circles + base) if not clear
+        if code != 0 && code != 1 {
+            let cloud = NSColor(hex: 0x3a3a3d)
+            cloud.setFill()
+            let base = NSRect(x: r.minX + 6, y: r.minY + 4, width: 40, height: 20)
+            NSBezierPath(roundedRect: base, xRadius: 10, yRadius: 10).fill()
+            NSBezierPath(ovalIn: NSRect(x: r.minX + 12, y: r.minY + 10, width: 18, height: 18)).fill()
+            NSBezierPath(ovalIn: NSRect(x: r.minX + 24, y: r.minY + 12, width: 20, height: 20)).fill()
+        }
     }
 
     private func drawArrowsAndDots() {
-        drawArrow("‹", side: .left, centerX: Self.arrowZone / 2)
-        drawArrow("›", side: .right, centerX: bounds.maxX - Self.arrowZone / 2)
-
+        drawArrow("‹", side: .left, cx: Self.arrowZone / 2)
+        drawArrow("›", side: .right, cx: bounds.maxX - Self.arrowZone / 2)
         let n = pages.count, gap: CGFloat = 12, rr: CGFloat = 3
         var dx = bounds.midX - CGFloat(n - 1) * gap / 2
         for i in 0..<n {
-            (i == index ? amber : NSColor(white: 0.25, alpha: 1)).setFill()
+            (i == index ? Theme.amber : Theme.border).setFill()
             NSBezierPath(ovalIn: NSRect(x: dx - rr, y: 11, width: rr * 2, height: rr * 2)).fill()
             dx += gap
         }
     }
-
-    private func drawArrow(_ glyph: String, side: Side, centerX: CGFloat) {
-        let hovered = hoveredArrow == side
-        let cy = bounds.midY
-        if hovered {
-            NSColor(white: 1, alpha: 0.14).setFill()
-            NSBezierPath(ovalIn: NSRect(x: centerX - 15, y: cy - 15, width: 30, height: 30)).fill()
-        }
-        draw(glyph, centeredX: centerX, y: cy, font: mono(20, .regular),
-             color: hovered ? .white : dim)
+    private func drawArrow(_ g: String, side: Side, cx: CGFloat) {
+        let hov = hoveredArrow == side; let cy = bounds.midY
+        if hov { NSColor(white: 1, alpha: 0.12).setFill(); NSBezierPath(ovalIn: NSRect(x: cx - 15, y: cy - 15, width: 30, height: 30)).fill() }
+        let a = NSAttributedString(string: g, attributes: [.font: Theme.mono(20), .foregroundColor: hov ? Theme.ink : Theme.faint])
+        let sz = a.size(); a.draw(at: NSPoint(x: cx - sz.width / 2, y: cy - sz.height / 2))
     }
 
     // MARK: text helpers
 
-    private func mono(_ s: CGFloat, _ w: NSFont.Weight) -> NSFont {
-        NSFont(name: "JetBrains Mono", size: s) ?? .monospacedSystemFont(ofSize: s, weight: w)
-    }
-    private func sans(_ s: CGFloat, _ w: NSFont.Weight) -> NSFont { .systemFont(ofSize: s, weight: w) }
-
-    private func draw(_ s: String, at p: NSPoint, font: NSFont, color: NSColor, kern: CGFloat = 0) {
+    private func text(_ s: String, _ p: NSPoint, _ font: NSFont, _ color: NSColor, kern: CGFloat = 0) {
         NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color, .kern: kern]).draw(at: p)
     }
-    private func draw(_ s: String, centeredX cx: CGFloat, y: CGFloat, font: NSFont, color: NSColor) {
-        let str = NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color])
-        let sz = str.size()
-        str.draw(at: NSPoint(x: cx - sz.width / 2, y: y - sz.height / 2))
-    }
-    private func truncate(_ s: String, w: CGFloat, font: NSFont) -> String {
+    private func truncate(_ s: String, _ w: CGFloat, _ font: NSFont) -> String {
         let attrs: [NSAttributedString.Key: Any] = [.font: font]
         if (s as NSString).size(withAttributes: attrs).width <= w { return s }
         var t = s
-        while t.count > 1 && ((t + "…") as NSString).size(withAttributes: attrs).width > w {
-            t.removeLast()
-        }
+        while t.count > 1 && ((t + "…") as NSString).size(withAttributes: attrs).width > w { t.removeLast() }
         return t + "…"
+    }
+    private func brl(_ v: Double) -> String {
+        let f = NumberFormatter(); f.numberStyle = .currency; f.locale = Locale(identifier: "pt_BR"); f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: v)) ?? "—"
+    }
+    private func ago(_ ms: Double?) -> String {
+        guard let ms else { return "" }
+        let secs = Int(Date().timeIntervalSince1970 - ms / 1000)
+        if secs < 60 { return "now" }
+        let m = secs / 60
+        return m < 60 ? "\(m)m" : "\(m / 60)h\(m % 60)m"
     }
 
     private func bottomRounded(_ r: NSRect, radius: CGFloat) -> NSBezierPath {
@@ -351,11 +360,9 @@ final class CarouselPanelView: NSView {
         p.move(to: NSPoint(x: r.minX, y: r.maxY))
         p.line(to: NSPoint(x: r.maxX, y: r.maxY))
         p.line(to: NSPoint(x: r.maxX, y: r.minY + rad))
-        p.appendArc(withCenter: NSPoint(x: r.maxX - rad, y: r.minY + rad),
-                    radius: rad, startAngle: 0, endAngle: 270, clockwise: true)
+        p.appendArc(withCenter: NSPoint(x: r.maxX - rad, y: r.minY + rad), radius: rad, startAngle: 0, endAngle: 270, clockwise: true)
         p.line(to: NSPoint(x: r.minX + rad, y: r.minY))
-        p.appendArc(withCenter: NSPoint(x: r.minX + rad, y: r.minY + rad),
-                    radius: rad, startAngle: 270, endAngle: 180, clockwise: true)
+        p.appendArc(withCenter: NSPoint(x: r.minX + rad, y: r.minY + rad), radius: rad, startAngle: 270, endAngle: 180, clockwise: true)
         p.line(to: NSPoint(x: r.minX, y: r.maxY))
         p.close()
         return p

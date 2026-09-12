@@ -79,7 +79,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     .init(name: "PETR4", deltaAbs: 1200, deltaPct: 1.8),
                     .init(name: "BTC", deltaAbs: -800, deltaPct: -0.9),
                     .init(name: "IVVB11", deltaAbs: 600, deltaPct: 0.4),
-                ])
+                ], series: [1_180_000, 1_192_000, 1_188_000, 1_205_000, 1_210_000, 1_202_000,
+                            1_221_000, 1_218_000, 1_229_000, 1_224_000, 1_231_000, 1_240_000,
+                            1_236_000, 1_247_000, 1_231_000, 1_234_567])
             let nowMs = Date().timeIntervalSince1970 * 1000
             agentsSummary = AgentsSummary(asOf: nil, count: 3, needsAttention: [
                 .init(id: "wt1", label: "Review the diff", repo: "acme-web", engine: "claude", state: "review", since: nowMs - 320_000),

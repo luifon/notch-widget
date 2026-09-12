@@ -8,6 +8,7 @@ let package = Package(
         .executableTarget(
             name: "NotchWidget",
             path: "Sources/NotchWidget",
+            resources: [.process("Resources")],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("CoreGraphics"),
