@@ -241,13 +241,15 @@ final class CarouselPanelView: NSView {
         let f = Theme.mono(9.5, .semibold)
         let a = NSAttributedString(string: label, attributes: [.font: f, .foregroundColor: Theme.amber, .kern: 1.3])
         let sz = a.size(); let padX: CGFloat = 7
-        let r = NSRect(x: 12, y: bounds.maxY - 26, width: ceil(sz.width) + padX * 2, height: 17)
+        // Align the header to the same left/right margins as the tiles below
+        // (which are inset by the arrow column), so the badge lines up with them.
+        let r = NSRect(x: Self.arrowZone, y: bounds.maxY - 26, width: ceil(sz.width) + padX * 2, height: 17)
         Theme.amber.withAlphaComponent(0.09).setFill(); NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5).fill()
         let b = NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5); b.lineWidth = 1; Theme.amber.withAlphaComponent(0.4).setStroke(); b.stroke()
         a.draw(at: NSPoint(x: r.minX + padX, y: r.midY - sz.height / 2))
         if let right {
             let rs = NSAttributedString(string: right, attributes: [.font: Theme.mono(10), .foregroundColor: Theme.faint])
-            let z = rs.size(); rs.draw(at: NSPoint(x: bounds.maxX - 14 - z.width, y: r.midY - z.height / 2))
+            let z = rs.size(); rs.draw(at: NSPoint(x: bounds.maxX - Self.arrowZone - z.width, y: r.midY - z.height / 2))
         }
         let divY = bounds.maxY - 36
         let d = NSBezierPath(); d.move(to: NSPoint(x: 0, y: divY)); d.line(to: NSPoint(x: bounds.width, y: divY)); d.lineWidth = 1
