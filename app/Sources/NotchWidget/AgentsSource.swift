@@ -9,8 +9,8 @@ struct AgentsSummary: Codable {
 
     struct Item: Codable {
         let id: String       // worktree id, used to acknowledge
-        let label: String
-        let repo: String
+        let label: String    // project (repo) — the primary identifier
+        let detail: String   // branch / worktree, when it adds information
         let engine: String   // "claude" | "codex"
         let state: String    // "review" | "needs approval" | "finished" | "interrupted"
         let since: Double?   // epoch milliseconds

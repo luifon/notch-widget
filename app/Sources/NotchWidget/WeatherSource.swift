@@ -10,6 +10,9 @@ struct WeatherSummary {
     let maxC: Double
     let minC: Double
     let place: String
+    let hourly: [Hour]
+
+    struct Hour { let label: String; let tempC: Double; let code: Int }
 
     var label: String { WeatherSummary.labels[code] ?? "—" }
 
@@ -55,9 +58,10 @@ final class WeatherSource {
             .init(name: "latitude", value: String(cfg.latitude)),
             .init(name: "longitude", value: String(cfg.longitude)),
             .init(name: "current", value: "temperature_2m,apparent_temperature,weather_code"),
+            .init(name: "hourly", value: "temperature_2m,weather_code"),
             .init(name: "daily", value: "temperature_2m_max,temperature_2m_min"),
             .init(name: "timezone", value: "auto"),
-            .init(name: "forecast_days", value: "1"),
+            .init(name: "forecast_days", value: "2"),
         ]
         URLSession.shared.dataTask(with: comps.url!) { data, _, _ in
             let summary = data.flatMap { Self.parse($0, place: place) }
@@ -75,6 +79,20 @@ final class WeatherSource {
               let mx = (daily["temperature_2m_max"] as? [NSNumber])?.first?.doubleValue,
               let mn = (daily["temperature_2m_min"] as? [NSNumber])?.first?.doubleValue
         else { return nil }
-        return WeatherSummary(tempC: t, feelsC: f, code: code, maxC: mx, minC: mn, place: place)
+
+        var hours: [WeatherSummary.Hour] = []
+        if let hourly = obj["hourly"] as? [String: Any],
+           let times = hourly["time"] as? [String],
+           let temps = hourly["temperature_2m"] as? [NSNumber],
+           let codes = hourly["weather_code"] as? [NSNumber] {
+            let nowKey = (cur["time"] as? String) ?? ""
+            var start = times.firstIndex { $0 >= nowKey } ?? 0
+            start = min(start + 1, max(0, times.count - 1))   // next hour onward
+            for i in start..<min(start + 5, times.count) {
+                let hh = String(times[i].suffix(5).prefix(2))   // "HH" from "…THH:MM"
+                hours.append(.init(label: "\(hh)h", tempC: temps[i].doubleValue, code: codes[i].intValue))
+            }
+        }
+        return WeatherSummary(tempC: t, feelsC: f, code: code, maxC: mx, minC: mn, place: place, hourly: hours)
     }
 }

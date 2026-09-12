@@ -29,7 +29,7 @@ final class CarouselPanelView: NSView {
     }
     static func agentsHeight(_ n: Int) -> CGFloat { headerH + CGFloat(max(1, min(4, n))) * 52 + dotsH }
     static let financeHeight: CGFloat = 214
-    static let weatherHeight: CGFloat = 150
+    static let weatherHeight: CGFloat = 200
 
     var onCardClick: ((String) -> Void)?
     private var cardHits: [(rect: NSRect, id: String)] = []
@@ -159,10 +159,9 @@ final class CarouselPanelView: NSView {
         }
         let x = r.minX + 48
         text(truncate(it.label, r.width - 130, Theme.mono(13, .semibold)), NSPoint(x: x, y: r.maxY - 22), Theme.mono(13, .semibold), Theme.ink)
-        // repo chip + ago
-        let repo = it.repo.isEmpty ? "" : it.repo
+        // branch chip + ago
         var sx = x
-        if !repo.isEmpty { sx = chip(repo, at: NSPoint(x: x, y: r.minY + 9)) + 6 }
+        if !it.detail.isEmpty { sx = chip(it.detail, at: NSPoint(x: x, y: r.minY + 9)) + 6 }
         text(ago(it.since), NSPoint(x: sx, y: r.minY + 11), Theme.mono(10), Theme.faint)
         // state pill
         pill(it.state, color: stateColor(it.state), rightOf: r)
@@ -175,9 +174,35 @@ final class CarouselPanelView: NSView {
         text(temp, NSPoint(x: c.minX + 62, y: bounds.maxY - 68), Theme.mono(34, .bold), Theme.ink)
         let tw = (temp as NSString).size(withAttributes: [.font: Theme.mono(34, .bold)]).width
         text(w.label, NSPoint(x: c.minX + 62 + tw + 14, y: bounds.maxY - 56), Theme.mono(14), Theme.ink)
-        // feels / H / L
         let sub = "feels \(Int(round(w.feelsC)))°     H \(Int(round(w.maxC)))°     L \(Int(round(w.minC)))°"
         text(sub, NSPoint(x: c.minX, y: bounds.maxY - 104), Theme.mono(12), Theme.faint)
+
+        // hourly strip
+        guard !w.hourly.isEmpty else { return }
+        let divY = bounds.maxY - 118
+        Theme.border.setStroke()
+        let div = NSBezierPath(); div.move(to: NSPoint(x: c.minX, y: divY)); div.line(to: NSPoint(x: c.maxX, y: divY)); div.lineWidth = 1; div.stroke()
+        let cols = Array(w.hourly.prefix(5)); let colW = c.width / CGFloat(cols.count)
+        for (i, h) in cols.enumerated() {
+            let cx = c.minX + colW * CGFloat(i) + colW / 2
+            centerText(h.label, cx: cx, y: divY - 20, Theme.mono(10), Theme.faint)
+            hourDotColor(h.code).setFill()
+            NSBezierPath(ovalIn: NSRect(x: cx - 3.5, y: divY - 36, width: 7, height: 7)).fill()
+            centerText("\(Int(round(h.tempC)))°", cx: cx, y: divY - 56, Theme.mono(11, .semibold), Theme.ink)
+        }
+    }
+
+    private func centerText(_ s: String, cx: CGFloat, y: CGFloat, _ font: NSFont, _ color: NSColor) {
+        let a = NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color])
+        a.draw(at: NSPoint(x: cx - a.size().width / 2, y: y))
+    }
+    private func hourDotColor(_ code: Int) -> NSColor {
+        switch code {
+        case 0, 1: return Theme.amber
+        case 51...67, 80...82, 95...99: return Theme.blue
+        case 71...77, 85, 86: return Theme.ink
+        default: return Theme.faint
+        }
     }
 
     private func drawFinance(_ s: FinanceSummary) {

@@ -84,11 +84,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             1_236_000, 1_247_000, 1_231_000, 1_234_567])
             let nowMs = Date().timeIntervalSince1970 * 1000
             agentsSummary = AgentsSummary(asOf: nil, count: 3, needsAttention: [
-                .init(id: "wt1", label: "Review the diff", repo: "acme-web", engine: "claude", state: "review", since: nowMs - 320_000),
-                .init(id: "wt2", label: "Fix the migration", repo: "toolkit", engine: "codex", state: "interrupted", since: nowMs - 1_500_000),
-                .init(id: "wt3", label: "Draft release notes", repo: "demo-app", engine: "claude", state: "finished", since: nowMs - 60_000),
+                .init(id: "wt1", label: "acme-web", detail: "main", engine: "claude", state: "review", since: nowMs - 320_000),
+                .init(id: "wt2", label: "toolkit", detail: "fix-migration", engine: "codex", state: "interrupted", since: nowMs - 1_500_000),
+                .init(id: "wt3", label: "demo-app", detail: "release", engine: "claude", state: "finished", since: nowMs - 60_000),
             ])
-            weatherSummary = WeatherSummary(tempC: 24.6, feelsC: 25.9, code: 3, maxC: 29.6, minC: 17.8, place: "São Paulo")
+            weatherSummary = WeatherSummary(tempC: 24.6, feelsC: 25.9, code: 3, maxC: 29.6, minC: 17.8, place: "São Paulo",
+                hourly: [.init(label: "15h", tempC: 26, code: 1), .init(label: "17h", tempC: 24, code: 2),
+                         .init(label: "19h", tempC: 21, code: 3), .init(label: "21h", tempC: 19, code: 61),
+                         .init(label: "23h", tempC: 18, code: 3)])
             rebuildPages()
             bandView.apply(BandState(left: "Daily RJ", right: "in 3m", urgency: .now))
             lastCards = mock
