@@ -17,7 +17,7 @@ final class CarouselPanelView: NSView {
     var index: Int = 0 { didSet { needsDisplay = true } }
     var cornerRadius: CGFloat = 18
 
-    static let headerH: CGFloat = 44
+    static let headerH: CGFloat = 54   // header bar + a clear gap before content
     static let cardH: CGFloat = 64
     static let cardGap: CGFloat = 10
     static let dotsH: CGFloat = 28
@@ -35,7 +35,7 @@ final class CarouselPanelView: NSView {
         h += CGFloat(min(3, s.movers.count)) * 22
         return h
     }
-    static let weatherHeight: CGFloat = 200
+    static let weatherHeight: CGFloat = 222
 
     var onCardClick: ((String) -> Void)?
     private var cardHits: [(rect: NSRect, id: String)] = []
@@ -175,17 +175,18 @@ final class CarouselPanelView: NSView {
 
     private func drawWeather(_ w: WeatherSummary) {
         let c = content()
-        drawWeatherIcon(NSRect(x: c.minX, y: bounds.maxY - 78, width: 52, height: 52), code: w.code)
+        let top = bounds.maxY - Self.headerH   // content top, clear of the header
+        drawWeatherIcon(NSRect(x: c.minX, y: top - 48, width: 48, height: 48), code: w.code)
         let temp = "\(Int(round(w.tempC)))°"
-        text(temp, NSPoint(x: c.minX + 62, y: bounds.maxY - 68), Theme.mono(34, .bold), Theme.ink)
+        text(temp, NSPoint(x: c.minX + 58, y: top - 36), Theme.mono(34, .bold), Theme.ink)
         let tw = (temp as NSString).size(withAttributes: [.font: Theme.mono(34, .bold)]).width
-        text(w.label, NSPoint(x: c.minX + 62 + tw + 14, y: bounds.maxY - 56), Theme.mono(14), Theme.ink)
+        text(w.label, NSPoint(x: c.minX + 58 + tw + 14, y: top - 26), Theme.mono(14), Theme.ink)
         let sub = "feels \(Int(round(w.feelsC)))°     H \(Int(round(w.maxC)))°     L \(Int(round(w.minC)))°"
-        text(sub, NSPoint(x: c.minX, y: bounds.maxY - 104), Theme.mono(12), Theme.faint)
+        text(sub, NSPoint(x: c.minX, y: top - 62), Theme.mono(12), Theme.faint)
 
         // hourly strip
         guard !w.hourly.isEmpty else { return }
-        let divY = bounds.maxY - 118
+        let divY = top - 78
         Theme.border.setStroke()
         let div = NSBezierPath(); div.move(to: NSPoint(x: c.minX, y: divY)); div.line(to: NSPoint(x: c.maxX, y: divY)); div.lineWidth = 1; div.stroke()
         let cols = Array(w.hourly.prefix(5)); let colW = c.width / CGFloat(cols.count)
@@ -213,7 +214,7 @@ final class CarouselPanelView: NSView {
 
     private func drawFinance(_ s: FinanceSummary) {
         let c = content()
-        var y = bounds.maxY - 70   // NW baseline, clear of the header divider
+        var y = bounds.maxY - 82   // NW baseline, clear of the header divider
 
         text(brl(s.netWorth), NSPoint(x: c.minX, y: y), Theme.mono(28, .bold), Theme.ink)
         y -= 30
@@ -239,9 +240,9 @@ final class CarouselPanelView: NSView {
     }
 
     private func drawSimple(_ title: String, _ meta: String) {
-        let c = content()
-        text(title, NSPoint(x: c.minX, y: bounds.maxY - 62), Theme.mono(16, .semibold), Theme.ink)
-        text(meta, NSPoint(x: c.minX, y: bounds.maxY - 86), Theme.mono(12), Theme.faint)
+        let c = content(); let top = bounds.maxY - Self.headerH
+        text(title, NSPoint(x: c.minX, y: top - 24), Theme.mono(16, .semibold), Theme.ink)
+        text(meta, NSPoint(x: c.minX, y: top - 48), Theme.mono(12), Theme.faint)
     }
 
     // MARK: components
