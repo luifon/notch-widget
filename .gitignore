@@ -15,3 +15,12 @@ DerivedData/
 # Local codesigning identity override, scratch, logs
 .env
 *.log
+
+# Runtime data files produced on the operator's machine (Application Support).
+# They carry real project/branch names, home paths, and finances. They live
+# outside the repo, so this is a defensive net: never commit a copy, sample,
+# fixture, or Resources bundle of them.
+agents.json
+agents-ack.json
+finance.json
+weather-config.json
