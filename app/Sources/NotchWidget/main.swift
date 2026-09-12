@@ -259,7 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var ph = CarouselPanelView.panelHeight(meetingCards: meetingCount)
             if let a = agentsSummary { ph = max(ph, CarouselPanelView.agentsHeight(a.needsAttention.count)) }
             if weatherSummary != nil { ph = max(ph, CarouselPanelView.weatherHeight) }
-            if financeSummary != nil { ph = max(ph, CarouselPanelView.financeHeight) }
+            if let f = financeSummary { ph = max(ph, CarouselPanelView.financeHeight(f)) }
             let (f, gapMinX) = geo.expandedFrame(width: expandedWidth, panelHeight: ph, barExtra: barExtra)
             bandView.gapMinX = gapMinX
             frame = f

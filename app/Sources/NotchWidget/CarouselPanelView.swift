@@ -28,7 +28,13 @@ final class CarouselPanelView: NSView {
         return headerH + CGFloat(c) * cardH + CGFloat(c - 1) * cardGap + dotsH
     }
     static func agentsHeight(_ n: Int) -> CGFloat { headerH + CGFloat(max(1, min(4, n))) * 52 + dotsH }
-    static let financeHeight: CGFloat = 214
+    static func financeHeight(_ s: FinanceSummary) -> CGFloat {
+        var h: CGFloat = headerH + 34 + 22 + dotsH   // header + NW + liquid + dots
+        if s.deltaAbs != nil { h += 28 }
+        if (s.series?.count ?? 0) > 1 { h += 44 }
+        h += CGFloat(min(3, s.movers.count)) * 22
+        return h
+    }
     static let weatherHeight: CGFloat = 200
 
     var onCardClick: ((String) -> Void)?
@@ -207,24 +213,28 @@ final class CarouselPanelView: NSView {
 
     private func drawFinance(_ s: FinanceSummary) {
         let c = content()
-        let nw = brl(s.netWorth)
-        text(nw, NSPoint(x: c.minX, y: bounds.maxY - 62), Theme.mono(28, .bold), Theme.ink)
-        // delta pill
+        var y = bounds.maxY - 70   // NW baseline, clear of the header divider
+
+        text(brl(s.netWorth), NSPoint(x: c.minX, y: y), Theme.mono(28, .bold), Theme.ink)
+        y -= 30
+
         if let d = s.deltaAbs, let p = s.deltaPct {
             let up = d >= 0; let col = up ? Theme.ok : Theme.down
             let s2 = "\(up ? "▲" : "▼") \(up ? "+" : "−")\(brl(abs(d)))  \(up ? "+" : "−")\(String(format: "%.2f", abs(p)))%"
             let f = Theme.mono(12, .semibold); let sz = (s2 as NSString).size(withAttributes: [.font: f])
-            let pr = NSRect(x: c.minX, y: bounds.maxY - 88, width: sz.width + 16, height: 20)
+            let pr = NSRect(x: c.minX, y: y - 3, width: sz.width + 16, height: 20)
             col.withAlphaComponent(0.13).setFill(); NSBezierPath(roundedRect: pr, xRadius: 6, yRadius: 6).fill()
             text(s2, NSPoint(x: pr.minX + 8, y: pr.midY - sz.height / 2), f, col)
+            y -= 28
         }
-        text("Liquid · \(brl(s.liquidNetWorth))", NSPoint(x: c.minX, y: bounds.maxY - 108), Theme.mono(11), Theme.faint)
-        // sparkline
+
+        text("Liquid · \(brl(s.liquidNetWorth))", NSPoint(x: c.minX, y: y), Theme.mono(11), Theme.faint)
+        y -= 22
+
         if let series = s.series, series.count > 1 {
-            drawSparkline(series, in: NSRect(x: c.minX, y: bounds.maxY - 148, width: c.width, height: 34))
+            drawSparkline(series, in: NSRect(x: c.minX, y: y - 34, width: c.width, height: 34))
+            y -= 44
         }
-        // movers
-        var y = bounds.maxY - 172
         for m in s.movers.prefix(3) { drawMover(m, at: y, width: c.width, x: c.minX); y -= 22 }
     }
 
