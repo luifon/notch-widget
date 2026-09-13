@@ -42,9 +42,15 @@ final class CarouselPanelView: NSView {
     static let briefPadX: CGFloat = 12
     static let briefPadY: CGFloat = 10
     static let briefLine: CGFloat = 16
-    static let briefMaxLines = 5
+    // The brief is the state of things, so the tile grows to fit it and the page
+    // grows with the tile. A line holds 49 characters at 12pt mono in a 358pt
+    // tile, so this cap is around 80 words; past that it ellipsizes rather than
+    // pushing the list off the screen.
+    static let briefMaxLines = 12
+    static let briefMinLines = 3
     static let newsLabelH: CGFloat = 24     // "RANKED" caption + its divider
     static let newsViewportH: CGFloat = 292 // ≈ 5 rows before scrolling
+    static let newsMinViewportH: CGFloat = 208 // ≥ 4 rows, whatever the brief costs
     static let newsPadY: CGFloat = 9
     static let newsTitleLine: CGFloat = 17
     static let newsTitleMaxLines = 2
@@ -379,10 +385,16 @@ final class CarouselPanelView: NSView {
         let c = content()
         var top = bounds.maxY - Self.headerH
 
-        // Brief: the state of things. Always visible, never scrolls.
+        // Brief: the state of things. Always visible, never scrolls. The page
+        // asked for the full tile, but the frame may have been clamped to the
+        // screen — in that case the brief gives up lines so the list keeps at
+        // least its minimum viewport.
         if let brief = s.brief, !brief.isEmpty {
+            let headroom = (bounds.maxY - Self.headerH) - 12 - Self.newsLabelH
+                - (Self.dotsH + 4) - Self.newsMinViewportH - Self.briefPadY * 2
+            let allowed = max(Self.briefMinLines, min(Self.briefMaxLines, Int(floor(headroom / Self.briefLine))))
             let lines = Self.wrapped(brief, width: c.width - Self.briefPadX * 2,
-                                     font: Theme.mono(12), maxLines: Self.briefMaxLines)
+                                     font: Theme.mono(12), maxLines: allowed)
             let h = Self.briefPadY * 2 + CGFloat(lines.count) * Self.briefLine
             let r = NSRect(x: c.minX, y: top - h, width: c.width, height: h)
             tile(r)
