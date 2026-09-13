@@ -548,8 +548,10 @@ final class CarouselPanelView: NSView {
             text(age, NSPoint(x: sx, y: y), Theme.mono(10), Theme.faint)
             sx += (age as NSString).size(withAttributes: [.font: Theme.mono(10)]).width + 10
         }
-        if let reason, !reason.isEmpty {
-            let label = VoteReason.chipLabel(reason)
+        // The key comes from the producer, so it isn't necessarily one the widget
+        // writes — show it verbatim, but never let it run into the vote squares.
+        if let reason, !reason.isEmpty, maxX - sx > 30 {
+            let label = truncate(VoteReason.chipLabel(reason), min(96, maxX - sx - 10), Theme.mono(9.5))
             let r = chipRect(label, at: NSPoint(x: sx, y: y + 1), font: Theme.mono(9.5), padX: 5)
             drawChip(label, in: r, font: Theme.mono(9.5), ink: Theme.down, border: Theme.down.withAlphaComponent(0.45))
             if clip.contains(r) { newsReasonEditHits.append((r, id)) }
