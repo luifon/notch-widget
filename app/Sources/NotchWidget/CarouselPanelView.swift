@@ -102,6 +102,9 @@ final class CarouselPanelView: NSView {
     /// The reader clicked the reason already showing in a row's meta line, to
     /// change it. The caller puts the row back into reason mode.
     var onNewsReasonEdit: ((String) -> Void)?
+    /// A click landed on nothing while the chip strip was open — the reader
+    /// changed their mind. The vote stands; the strip closes.
+    var onNewsReasonDismiss: (() -> Void)?
     /// Fired when a headline is clicked; the caller opens it and collapses.
     var onNewsOpen: ((String, URL) -> Void)?
     /// True while a scroll gesture (or its momentum) is running, so the app can
@@ -117,6 +120,7 @@ final class CarouselPanelView: NSView {
     private var newsReasonEditHits: [(rect: NSRect, id: String)] = []
     private var hoveredNewsID: String?
     private var hoveredReasonKey: String?
+    private var hoveredReasonEditID: String?
 
     /// The one row showing the reason chip strip instead of its meta line, if
     /// any. The app owns the lifecycle (a vote, an open, a page change or a
@@ -174,7 +178,8 @@ final class CarouselPanelView: NSView {
         }
         // Leaving the panel drops row hover, but NOT reason mode: the reader may
         // be reaching for the free-text editor below.
-        hoveredNewsID = nil; hoveredReasonKey = nil; NSCursor.arrow.set(); needsDisplay = true
+        hoveredNewsID = nil; hoveredReasonKey = nil; hoveredReasonEditID = nil
+        NSCursor.arrow.set(); needsDisplay = true
     }
     override func mouseMoved(with e: NSEvent) {
         updateRowHover(at: convert(e.locationInWindow, from: nil))
@@ -185,9 +190,10 @@ final class CarouselPanelView: NSView {
         if id != hoveredNewsID { hoveredNewsID = id; needsDisplay = true }
         let key = newsReasonHits.first(where: { $0.rect.contains(p) })?.key
         if key != hoveredReasonKey { hoveredReasonKey = key; needsDisplay = true }
+        let edit = newsReasonEditHits.first(where: { $0.rect.contains(p) })?.id
+        if edit != hoveredReasonEditID { hoveredReasonEditID = edit; needsDisplay = true }
         guard hoveredArrow == nil else { return }
-        let clickable = key != nil
-            || newsReasonEditHits.contains { $0.rect.contains(p) }
+        let clickable = key != nil || edit != nil
             || newsOpenHits.contains { $0.rect.contains(p) }
         (clickable ? NSCursor.pointingHand : NSCursor.arrow).set()
     }
@@ -205,7 +211,8 @@ final class CarouselPanelView: NSView {
         if let e = newsReasonEditHits.first(where: { $0.rect.contains(p) }) { onNewsReasonEdit?(e.id); return }
         if let hit = newsOpenHits.first(where: { $0.rect.contains(p) }) { onNewsOpen?(hit.id, hit.url); return }
         if let hit = cardHits.first(where: { $0.rect.contains(p) }) { onCardClick?(hit.id); return }
-        if let hit = agentHits.first(where: { $0.rect.contains(p) }) { onAgentClick?(hit.id) }
+        if let hit = agentHits.first(where: { $0.rect.contains(p) }) { onAgentClick?(hit.id); return }
+        if reasonRowID != nil { onNewsReasonDismiss?() }
     }
 
     func page(_ delta: Int) {
@@ -523,7 +530,8 @@ final class CarouselPanelView: NSView {
         if reasonRowID == id {
             drawReasonStrip(id: id, x: x, y: sy, maxX: metaMaxX, clip: clip)
         } else {
-            drawNewsMeta(row, id: id, x: x, y: sy, maxX: metaMaxX, reason: state.reason, clip: clip)
+            drawNewsMeta(row, id: id, x: x, y: sy, maxX: metaMaxX, reason: state.reason,
+                         downvoted: state.vote == -1, clip: clip)
         }
 
         // Hit rects, trimmed to the viewport so a half-scrolled row can't be hit
@@ -540,7 +548,7 @@ final class CarouselPanelView: NSView {
     /// Source chip · age · the reader's reason, if any · why it ranked — in
     /// whatever order still fits.
     private func drawNewsMeta(_ row: NewsRow, id: String, x: CGFloat, y: CGFloat, maxX: CGFloat,
-                              reason: String?, clip: NSRect) {
+                              reason: String?, downvoted: Bool, clip: NSRect) {
         var sx = x
         if let src = row.item.source, !src.isEmpty { sx = chip(src, at: NSPoint(x: sx, y: y + 1)) + 7 }
         let age = Self.relativeAge(row.item.publishedAt)
@@ -548,12 +556,25 @@ final class CarouselPanelView: NSView {
             text(age, NSPoint(x: sx, y: y), Theme.mono(10), Theme.faint)
             sx += (age as NSString).size(withAttributes: [.font: Theme.mono(10)]).width + 10
         }
-        // The key comes from the producer, so it isn't necessarily one the widget
-        // writes — show it verbatim, but never let it run into the vote squares.
-        if let reason, !reason.isEmpty, maxX - sx > 30 {
-            let label = truncate(VoteReason.chipLabel(reason), min(96, maxX - sx - 10), Theme.mono(9.5))
-            let r = chipRect(label, at: NSPoint(x: sx, y: y + 1), font: Theme.mono(9.5), padX: 5)
-            drawChip(label, in: r, font: Theme.mono(9.5), ink: Theme.down, border: Theme.down.withAlphaComponent(0.45))
+        // Either the reason the reader gave, or — on a downvote that never got
+        // one — an invitation to give it now. Same slot either way; both reopen
+        // the chip strip. The key comes from the producer, so it isn't
+        // necessarily one the widget writes: show it verbatim, but never let it
+        // run into the vote squares.
+        let hasReason = !(reason ?? "").isEmpty
+        if (hasReason || downvoted), maxX - sx > 30 {
+            let font = Theme.mono(9.5)
+            let hot = hoveredReasonEditID == id
+            let label = hasReason
+                ? truncate(VoteReason.chipLabel(reason!), min(96, maxX - sx - 10), font)
+                : "why?"
+            let ink: NSColor = hasReason ? Theme.down : (hot ? Theme.ink : Theme.faint)
+            let border: NSColor = hasReason
+                ? Theme.down.withAlphaComponent(hot ? 0.8 : 0.45)
+                : (hot ? Theme.ink : Theme.border)
+            let r = chipRect(label, at: NSPoint(x: sx, y: y + 1), font: font, padX: 5)
+            drawChip(label, in: r, font: font, ink: ink, border: border,
+                     fill: hot ? Theme.surface2 : nil)
             if clip.contains(r) { newsReasonEditHits.append((r, id)) }
             sx = r.maxX + 7
         }
