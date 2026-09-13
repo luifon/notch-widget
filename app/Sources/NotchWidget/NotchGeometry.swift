@@ -5,6 +5,7 @@ import AppKit
 /// the expanded panel is a fixed wider width centered on the notch.
 struct NotchGeometry {
     let screenFrame: NSRect
+    let visibleFrame: NSRect   // screen minus menu bar and Dock — the expansion limit
     let topInset: CGFloat
     let notchLeftX: CGFloat
     let notchRightX: CGFloat
@@ -24,7 +25,8 @@ struct NotchGeometry {
         } else {
             lx = f.midX - 90; rx = f.midX + 90   // no notch — fake a centered gap for testing
         }
-        return NotchGeometry(screenFrame: f, topInset: inset, notchLeftX: lx, notchRightX: rx)
+        return NotchGeometry(screenFrame: f, visibleFrame: screen.visibleFrame,
+                             topInset: inset, notchLeftX: lx, notchRightX: rx)
     }
 
     /// Collapsed bar: hugs the given flank widths around the notch, clamped to
@@ -39,10 +41,13 @@ struct NotchGeometry {
     }
 
     /// Expanded panel: fixed width centered on the notch. `barExtra` keeps the
-    /// band portion the same height as the collapsed bar.
+    /// band portion the same height as the collapsed bar. The total height is
+    /// clamped to the visible frame, so a tall page stops above the Dock instead
+    /// of running off the screen; the page then draws into whatever it got.
     func expandedFrame(width: CGFloat, panelHeight: CGFloat, barExtra: CGFloat) -> (frame: NSRect, gapMinX: CGFloat) {
         let x = max(screenFrame.minX, min(notchCenterX - width / 2, screenFrame.maxX - width))
-        let h = topInset + barExtra + panelHeight
+        let bar = topInset + barExtra
+        let h = max(bar, min(bar + panelHeight, topY - visibleFrame.minY))
         let frame = NSRect(x: x, y: topY - h, width: width, height: h)
         return (frame, notchLeftX - x)
     }

@@ -22,5 +22,7 @@ DerivedData/
 # fixture, or Resources bundle of them.
 agents.json
 agents-ack.json
+news.json
+news-votes.json
 finance.json
 weather-config.json
