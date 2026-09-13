@@ -6,7 +6,7 @@ enum PageContent {
     case meetings([MeetingCard])
     case finance(FinanceSummary)
     case agents(AgentsSummary)
-    case news(NewsSummary, votes: [String: Int])
+    case news(NewsSummary, votes: [String: NewsVoteState], opened: Set<String>)
     case weather(WeatherSummary)
     case simple(kicker: String, title: String, meta: String)
 
@@ -58,6 +58,12 @@ final class CarouselPanelView: NSView {
     static let newsSublineH: CGFloat = 14
     static let voteSize: CGFloat = 28       // fixed hit target, always present
     static let voteGap: CGFloat = 2
+    // Reason chips replace the meta line in place, so they have to fit the space
+    // that line already occupies — between the title column and the vote squares.
+    static let reasonFont: CGFloat = 9
+    static let reasonPadX: CGFloat = 5
+    static let reasonGap: CGFloat = 4
+    static let readDotSize: CGFloat = 4
 
     static func panelHeight(meetingCards n: Int) -> CGFloat {
         let c = max(1, min(3, n))
@@ -90,8 +96,14 @@ final class CarouselPanelView: NSView {
 
     /// `(itemId, direction)` — the caller applies toggle semantics.
     var onNewsVote: ((String, Int) -> Void)?
+    /// `(itemId, reasonKey)` — a chip was picked in reason mode. `other` is the
+    /// caller's cue to ask for free text instead of saving straight away.
+    var onNewsReason: ((String, String) -> Void)?
+    /// The reader clicked the reason already showing in a row's meta line, to
+    /// change it. The caller puts the row back into reason mode.
+    var onNewsReasonEdit: ((String) -> Void)?
     /// Fired when a headline is clicked; the caller opens it and collapses.
-    var onNewsOpen: ((URL) -> Void)?
+    var onNewsOpen: ((String, URL) -> Void)?
     /// True while a scroll gesture (or its momentum) is running, so the app can
     /// hold off the pointer-exit collapse.
     var onScrollActivity: ((Bool) -> Void)?
@@ -99,9 +111,17 @@ final class CarouselPanelView: NSView {
     var onPageChange: (() -> Void)?
 
     private var newsRowHits: [(rect: NSRect, id: String)] = []
-    private var newsOpenHits: [(rect: NSRect, url: URL)] = []
+    private var newsOpenHits: [(rect: NSRect, id: String, url: URL)] = []
     private var newsVoteHits: [(rect: NSRect, id: String, direction: Int)] = []
+    private var newsReasonHits: [(rect: NSRect, id: String, key: String)] = []
+    private var newsReasonEditHits: [(rect: NSRect, id: String)] = []
     private var hoveredNewsID: String?
+    private var hoveredReasonKey: String?
+
+    /// The one row showing the reason chip strip instead of its meta line, if
+    /// any. The app owns the lifecycle (a vote, an open, a page change or a
+    /// collapse all end it), so this is set from outside.
+    var reasonRowID: String? { didSet { if reasonRowID != oldValue { hoveredReasonKey = nil; needsDisplay = true } } }
 
     // Scroll state for the news list.
     private var newsScroll: CGFloat = 0
@@ -152,7 +172,9 @@ final class CarouselPanelView: NSView {
             hoveredArrow = nil; NSCursor.arrow.set(); needsDisplay = true
             return
         }
-        hoveredNewsID = nil; NSCursor.arrow.set(); needsDisplay = true
+        // Leaving the panel drops row hover, but NOT reason mode: the reader may
+        // be reaching for the free-text editor below.
+        hoveredNewsID = nil; hoveredReasonKey = nil; NSCursor.arrow.set(); needsDisplay = true
     }
     override func mouseMoved(with e: NSEvent) {
         updateRowHover(at: convert(e.locationInWindow, from: nil))
@@ -161,9 +183,13 @@ final class CarouselPanelView: NSView {
     private func updateRowHover(at p: NSPoint) {
         let id = newsRowHits.first(where: { $0.rect.contains(p) })?.id
         if id != hoveredNewsID { hoveredNewsID = id; needsDisplay = true }
+        let key = newsReasonHits.first(where: { $0.rect.contains(p) })?.key
+        if key != hoveredReasonKey { hoveredReasonKey = key; needsDisplay = true }
         guard hoveredArrow == nil else { return }
-        let overHeadline = newsOpenHits.contains { $0.rect.contains(p) }
-        (overHeadline ? NSCursor.pointingHand : NSCursor.arrow).set()
+        let clickable = key != nil
+            || newsReasonEditHits.contains { $0.rect.contains(p) }
+            || newsOpenHits.contains { $0.rect.contains(p) }
+        (clickable ? NSCursor.pointingHand : NSCursor.arrow).set()
     }
 
     // MARK: clicks
@@ -172,9 +198,12 @@ final class CarouselPanelView: NSView {
         let p = convert(event.locationInWindow, from: nil)
         if pages.count > 1 && p.x < Self.arrowZone { page(-1); return }
         if pages.count > 1 && p.x > bounds.maxX - Self.arrowZone { page(1); return }
-        // Votes sit inside a headline row, so they must win the hit test.
+        // Votes and reason chips sit inside a headline row, so they must win the
+        // hit test against the row's own open target.
         if let v = newsVoteHits.first(where: { $0.rect.contains(p) }) { onNewsVote?(v.id, v.direction); return }
-        if let hit = newsOpenHits.first(where: { $0.rect.contains(p) }) { onNewsOpen?(hit.url); return }
+        if let c = newsReasonHits.first(where: { $0.rect.contains(p) }) { onNewsReason?(c.id, c.key); return }
+        if let e = newsReasonEditHits.first(where: { $0.rect.contains(p) }) { onNewsReasonEdit?(e.id); return }
+        if let hit = newsOpenHits.first(where: { $0.rect.contains(p) }) { onNewsOpen?(hit.id, hit.url); return }
         if let hit = cardHits.first(where: { $0.rect.contains(p) }) { onCardClick?(hit.id); return }
         if let hit = agentHits.first(where: { $0.rect.contains(p) }) { onAgentClick?(hit.id) }
     }
@@ -265,7 +294,7 @@ final class CarouselPanelView: NSView {
     /// vote round-trip reuses the same `asOf` and keeps the reader's position.
     private func newsDataChanged() {
         var asOf: String?
-        for p in pages { if case .news(let s, _) = p { asOf = s.asOf ?? ""; break } }
+        for p in pages { if case .news(let s, _, _) = p { asOf = s.asOf ?? ""; break } }
         if asOf != lastNewsAsOf { lastNewsAsOf = asOf; newsScroll = 0 }
     }
     private func clampIndex() {
@@ -280,12 +309,14 @@ final class CarouselPanelView: NSView {
         guard !pages.isEmpty else { return }
         cardHits.removeAll(); agentHits.removeAll()
         newsRowHits.removeAll(); newsOpenHits.removeAll(); newsVoteHits.removeAll()
+        newsReasonHits.removeAll(); newsReasonEditHits.removeAll()
 
         switch pages[index] {
         case .meetings(let cards): tag("NEXT MEETINGS"); drawMeetings(cards)
         case .finance(let s): tag("NET WORTH"); drawFinance(s)
         case .agents(let a): tag("AGENTS", right: a.count == 0 ? nil : "\(a.count) need you"); drawAgents(a)
-        case .news(let n, let votes): tag("NEWS", right: Self.newsHeaderRight(n)); drawNews(n, votes: votes)
+        case .news(let n, let votes, let opened):
+            tag("NEWS", right: Self.newsHeaderRight(n)); drawNews(n, votes: votes, opened: opened)
         case .weather(let w): tag("WEATHER", right: w.place); drawWeather(w)
         case .simple(let k, let t, let m): tag(k.uppercased()); drawSimple(t, m)
         }
@@ -381,7 +412,7 @@ final class CarouselPanelView: NSView {
         }
     }
 
-    private func drawNews(_ s: NewsSummary, votes: [String: Int]) {
+    private func drawNews(_ s: NewsSummary, votes: [String: NewsVoteState], opened: Set<String>) {
         let c = content()
         var top = bounds.maxY - Self.headerH
 
@@ -436,15 +467,18 @@ final class CarouselPanelView: NSView {
                            width: vp.width, height: row.height)
             offset += row.height
             guard r.maxY > vp.minY && r.minY < vp.maxY else { continue }
-            drawNewsRow(row, r, rank: i + 1, vote: votes[row.item.id] ?? 0, last: i == rows.count - 1, clip: vp)
+            drawNewsRow(row, r, rank: i + 1, state: votes[row.item.id] ?? .none,
+                        read: opened.contains(row.item.id), last: i == rows.count - 1, clip: vp)
         }
         NSGraphicsContext.restoreGraphicsState()
 
         drawScrollAffordances(vp)
     }
 
-    private func drawNewsRow(_ row: NewsRow, _ r: NSRect, rank: Int, vote: Int, last: Bool, clip: NSRect) {
-        let hovered = hoveredNewsID == row.item.id
+    private func drawNewsRow(_ row: NewsRow, _ r: NSRect, rank: Int, state: NewsVoteState,
+                             read: Bool, last: Bool, clip: NSRect) {
+        let id = row.item.id
+        let hovered = hoveredNewsID == id
         if hovered {
             Theme.surface2.setFill()
             NSBezierPath(roundedRect: r.insetBy(dx: 0, dy: 1), xRadius: 8, yRadius: 8).fill()
@@ -457,27 +491,23 @@ final class CarouselPanelView: NSView {
 
         let firstLineY = r.maxY - Self.newsPadY - Self.newsTitleLine
         let rk = NSAttributedString(string: "\(rank)", attributes: [.font: Theme.mono(10), .foregroundColor: Theme.faint])
-        rk.draw(at: NSPoint(x: r.minX + Self.newsRankW - 8 - rk.size().width, y: firstLineY + 2))
+        rk.draw(at: NSPoint(x: r.minX + Self.newsRankW - 4 - rk.size().width, y: firstLineY + 2))
+        // Read state: a dot in the gutter. The headline keeps its full weight —
+        // having read something doesn't make it less worth ranking first.
+        if read {
+            let d = Self.readDotSize
+            Theme.faint.setFill()
+            NSBezierPath(ovalIn: NSRect(x: r.minX, y: firstLineY + 7 - d / 2, width: d, height: d)).fill()
+        }
 
+        // A downvoted headline fades but stays where the ranker put it, so the
+        // list doesn't reshuffle under the reader's cursor mid-pass.
+        let titleInk = state.vote == -1 ? Theme.ink.withAlphaComponent(0.55) : Theme.ink
         let x = r.minX + Self.newsRankW
         var ty = firstLineY
         for line in row.titleLines {
-            text(line, NSPoint(x: x, y: ty), Theme.mono(12.5, .semibold), Theme.ink)
+            text(line, NSPoint(x: x, y: ty), Theme.mono(12.5, .semibold), titleInk)
             ty -= Self.newsTitleLine
-        }
-
-        // Source chip · age · why it ranked, in whatever order still fits.
-        let sy = r.minY + Self.newsPadY
-        var sx = x
-        if let src = row.item.source, !src.isEmpty { sx = chip(src, at: NSPoint(x: sx, y: sy + 1)) + 7 }
-        let age = Self.relativeAge(row.item.publishedAt)
-        if !age.isEmpty {
-            text(age, NSPoint(x: sx, y: sy), Theme.mono(10), Theme.faint)
-            sx += (age as NSString).size(withAttributes: [.font: Theme.mono(10)]).width + 10
-        }
-        if let reason = row.item.reason, !reason.isEmpty {
-            let avail = x + row.titleWidth - sx
-            if avail > 48 { text(truncate(reason, avail, Theme.mono(10)), NSPoint(x: sx, y: sy), Theme.mono(10), Theme.faint) }
         }
 
         // Vote controls: fixed squares at the right edge, well inside the arrow
@@ -485,17 +515,67 @@ final class CarouselPanelView: NSView {
         let vy = r.midY - Self.voteSize / 2
         let downR = NSRect(x: r.maxX - Self.voteSize, y: vy, width: Self.voteSize, height: Self.voteSize)
         let upR = NSRect(x: downR.minX - Self.voteGap - Self.voteSize, y: vy, width: Self.voteSize, height: Self.voteSize)
-        drawVote(upR, up: true, active: vote == 1, rowHovered: hovered)
-        drawVote(downR, up: false, active: vote == -1, rowHovered: hovered)
+        drawVote(upR, up: true, active: state.vote == 1, rowHovered: hovered)
+        drawVote(downR, up: false, active: state.vote == -1, rowHovered: hovered)
+
+        let sy = r.minY + Self.newsPadY
+        let metaMaxX = upR.minX - 4
+        if reasonRowID == id {
+            drawReasonStrip(id: id, x: x, y: sy, maxX: metaMaxX, clip: clip)
+        } else {
+            drawNewsMeta(row, id: id, x: x, y: sy, maxX: metaMaxX, reason: state.reason, clip: clip)
+        }
 
         // Hit rects, trimmed to the viewport so a half-scrolled row can't be hit
         // where it isn't drawn. Votes only count while fully visible.
-        newsRowHits.append((r.intersection(clip), row.item.id))
-        if clip.contains(upR) { newsVoteHits.append((upR, row.item.id, 1)) }
-        if clip.contains(downR) { newsVoteHits.append((downR, row.item.id, -1)) }
+        newsRowHits.append((r.intersection(clip), id))
+        if clip.contains(upR) { newsVoteHits.append((upR, id, 1)) }
+        if clip.contains(downR) { newsVoteHits.append((downR, id, -1)) }
         if let raw = row.item.url, let url = URL(string: raw) {
             let open = NSRect(x: r.minX, y: r.minY, width: upR.minX - 4 - r.minX, height: r.height)
-            newsOpenHits.append((open.intersection(clip), url))
+            newsOpenHits.append((open.intersection(clip), id, url))
+        }
+    }
+
+    /// Source chip · age · the reader's reason, if any · why it ranked — in
+    /// whatever order still fits.
+    private func drawNewsMeta(_ row: NewsRow, id: String, x: CGFloat, y: CGFloat, maxX: CGFloat,
+                              reason: String?, clip: NSRect) {
+        var sx = x
+        if let src = row.item.source, !src.isEmpty { sx = chip(src, at: NSPoint(x: sx, y: y + 1)) + 7 }
+        let age = Self.relativeAge(row.item.publishedAt)
+        if !age.isEmpty {
+            text(age, NSPoint(x: sx, y: y), Theme.mono(10), Theme.faint)
+            sx += (age as NSString).size(withAttributes: [.font: Theme.mono(10)]).width + 10
+        }
+        if let reason, !reason.isEmpty {
+            let label = VoteReason.chipLabel(reason)
+            let r = chipRect(label, at: NSPoint(x: sx, y: y + 1), font: Theme.mono(9.5), padX: 5)
+            drawChip(label, in: r, font: Theme.mono(9.5), ink: Theme.down, border: Theme.down.withAlphaComponent(0.45))
+            if clip.contains(r) { newsReasonEditHits.append((r, id)) }
+            sx = r.maxX + 7
+        }
+        if let why = row.item.reason, !why.isEmpty {
+            let avail = maxX - sx
+            if avail > 48 { text(truncate(why, avail, Theme.mono(10)), NSPoint(x: sx, y: y), Theme.mono(10), Theme.faint) }
+        }
+    }
+
+    /// Reason mode: the meta line is swapped for the chip strip in place, so the
+    /// row keeps its height and the list underneath never moves.
+    private func drawReasonStrip(id: String, x: CGFloat, y: CGFloat, maxX: CGFloat, clip: NSRect) {
+        let font = Theme.mono(Self.reasonFont)
+        var sx = x
+        for reason in VoteReason.allCases {
+            let r = chipRect(reason.label, at: NSPoint(x: sx, y: y + 1), font: font, padX: Self.reasonPadX)
+            guard r.maxX <= maxX else { break }
+            let hot = hoveredReasonKey == reason.rawValue
+            drawChip(reason.label, in: r, font: font,
+                     ink: hot ? Theme.ink : Theme.faint,
+                     border: hot ? Theme.ink : Theme.border,
+                     fill: hot ? Theme.surface2 : nil)
+            if clip.contains(r) { newsReasonHits.append((r, id, reason.rawValue)) }
+            sx = r.maxX + Self.reasonGap
         }
     }
 
@@ -638,12 +718,25 @@ final class CarouselPanelView: NSView {
 
     @discardableResult
     private func chip(_ s: String, at p: NSPoint) -> CGFloat {
-        let f = Theme.mono(9.5); let a = NSAttributedString(string: s, attributes: [.font: f, .foregroundColor: Theme.faint])
-        let sz = a.size(); let padX: CGFloat = 5
-        let r = NSRect(x: p.x, y: p.y - 2, width: sz.width + padX * 2, height: sz.height + 4)
-        let b = NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5); b.lineWidth = 1; Theme.border.setStroke(); b.stroke()
-        a.draw(at: NSPoint(x: r.minX + padX, y: r.minY + 2))
+        let f = Theme.mono(9.5)
+        let r = chipRect(s, at: p, font: f, padX: 5)
+        drawChip(s, in: r, font: f, ink: Theme.faint, border: Theme.border)
         return r.maxX
+    }
+
+    /// Where a chip lands, measured before it's drawn — the reason strip needs
+    /// the rect for hit-testing and for deciding whether the next chip still fits.
+    private func chipRect(_ s: String, at p: NSPoint, font: NSFont, padX: CGFloat) -> NSRect {
+        let sz = (s as NSString).size(withAttributes: [.font: font])
+        return NSRect(x: p.x, y: p.y - 2, width: ceil(sz.width) + padX * 2, height: ceil(sz.height) + 4)
+    }
+
+    private func drawChip(_ s: String, in r: NSRect, font: NSFont, ink: NSColor, border: NSColor, fill: NSColor? = nil) {
+        if let fill { fill.setFill(); NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5).fill() }
+        let b = NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5); b.lineWidth = 1
+        border.setStroke(); b.stroke()
+        let a = NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: ink])
+        a.draw(at: NSPoint(x: r.minX + (r.width - a.size().width) / 2, y: r.minY + 2))
     }
 
     private func pill(_ s: String, color: NSColor, rightOf r: NSRect) {

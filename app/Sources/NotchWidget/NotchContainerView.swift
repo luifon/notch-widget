@@ -5,6 +5,9 @@ import AppKit
 /// down into the panel still counts as "inside" and it stays open.
 final class NotchContainerView: NSView {
     var onHoverChange: ((Bool) -> Void)?
+    /// Last known pointer state, so a collapse deferred for some other reason can
+    /// be re-armed only when the pointer really is outside.
+    private(set) var isMouseInside = false
     private var tracking: NSTrackingArea?
 
     override var isFlipped: Bool { false }
@@ -19,6 +22,6 @@ final class NotchContainerView: NSView {
         tracking = t
     }
 
-    override func mouseEntered(with event: NSEvent) { onHoverChange?(true) }
-    override func mouseExited(with event: NSEvent) { onHoverChange?(false) }
+    override func mouseEntered(with event: NSEvent) { isMouseInside = true; onHoverChange?(true) }
+    override func mouseExited(with event: NSEvent) { isMouseInside = false; onHoverChange?(false) }
 }

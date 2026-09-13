@@ -26,6 +26,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let newsSource = NewsSource()
     private var newsSummary: NewsSummary?
     private var newsVotes: [String: NewsVote] = [:]
+    private var newsOpens: Set<String> = []
+    private let feedback = FeedbackEditor()
+    /// True while the free-text reason editor is up. The panel must not collapse
+    /// out from under a reader who is typing into it.
+    private var feedbackEditorOpen = false
     private var weatherTimer: Timer?
     private var externalTimer: Timer?
     private var mockMode = false
@@ -61,19 +66,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         carousel.onCardClick = { [weak self] id in self?.acknowledge(id) }
         carousel.onAgentClick = { [weak self] id in self?.ackAgent(id) }
         carousel.onNewsVote = { [weak self] id, direction in self?.voteNews(id, direction) }
-        carousel.onNewsOpen = { [weak self] url in
-            NSWorkspace.shared.open(url)
-            self?.setExpanded(false)
-        }
+        carousel.onNewsReason = { [weak self] id, key in self?.pickReason(id, key) }
+        carousel.onNewsReasonEdit = { [weak self] id in self?.enterReasonMode(id) }
+        carousel.onNewsOpen = { [weak self] id, url in self?.openNews(id, url) }
         carousel.onScrollActivity = { [weak self] active in self?.scrollActivityChanged(active) }
-        carousel.onPageChange = { [weak self] in self?.resizeToCurrentPage() }
+        carousel.onPageChange = { [weak self] in
+            guard let self else { return }
+            self.endReasonMode(save: false)
+            self.resizeToCurrentPage()
+        }
+        feedback.onSave = { [weak self] id, note in self?.saveReasonNote(id, note) }
+        feedback.onCancel = { [weak self] _ in self?.feedbackClosed() }
 
         panel = NotchPanel(contentRect: NSRect(x: 0, y: 0, width: 100, height: bandHeight))
         panel.contentView = container
         panel.acceptsMouseMovedEvents = true
         panel.orderFrontRegardless()
 
-        newsVotes = NewsSource.overlay()   // the outbox is the record of what the reader voted
+        newsVotes = NewsSource.overlay()   // the outboxes are the record of what the reader did
+        newsOpens = NewsSource.openedIDs()
 
         space = CGSSpace(level: 2_147_483_647)
         space.windows = [panel]
@@ -176,7 +187,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var pages: [PageContent] = [.meetings(lastCards)]
         if let a = agentsSummary { pages.append(.agents(a)) }
         if let n = newsSummary {
-            pages.append(.news(n, votes: NewsSource.effectiveVotes(n, overlay: newsVotes)))
+            pages.append(.news(n, votes: NewsSource.effectiveVotes(n, overlay: newsVotes),
+                               opened: NewsSource.effectiveOpens(n, opens: newsOpens)))
         }
         if let w = weatherSummary { pages.append(.weather(w)) }
         if let f = financeSummary { pages.append(.finance(f)) }
@@ -196,11 +208,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Toggle semantics: voting the same way twice clears the vote. The outbox
     /// records every click, including the clearing one.
+    ///
+    /// A fresh downvote opens the reason strip on that row — and only a fresh
+    /// one: clearing a downvote, or upvoting, never asks why.
     private func voteNews(_ id: String, _ direction: Int) {
         guard let s = newsSummary else { return }
-        let current = NewsSource.effectiveVotes(s, overlay: newsVotes)[id] ?? 0
-        newsVotes[id] = NewsSource.vote(itemId: id, vote: current == direction ? 0 : direction)
+        endReasonMode(save: false)
+        let current = NewsSource.effectiveVotes(s, overlay: newsVotes)[id]?.vote ?? 0
+        let next = current == direction ? 0 : direction
+        newsVotes[id] = NewsSource.vote(itemId: id, vote: next)
         rebuildPages()
+        if next == -1 { carousel.reasonRowID = id }
+    }
+
+    /// A reason chip was picked. Every key but `other` is recorded straight away;
+    /// `other` needs the free-text editor first.
+    private func pickReason(_ id: String, _ key: String) {
+        carousel.reasonRowID = nil
+        guard key != VoteReason.other.rawValue else {
+            feedbackEditorOpen = true
+            closeWork?.cancel()
+            feedback.open(itemId: id, below: panel.frame)
+            return
+        }
+        newsVotes[id] = NewsSource.vote(itemId: id, vote: -1, reason: key)
+        rebuildPages()
+    }
+
+    private func saveReasonNote(_ id: String, _ note: String) {
+        newsVotes[id] = NewsSource.vote(itemId: id, vote: -1,
+                                        reason: VoteReason.other.rawValue, note: note)
+        rebuildPages()
+        feedbackClosed()
+    }
+
+    /// The editor is gone: the panel is free to collapse on pointer-exit again.
+    private func feedbackClosed() {
+        feedbackEditorOpen = false
+        if !container.isMouseInside { scheduleCollapse() }
+    }
+
+    private func enterReasonMode(_ id: String) {
+        endReasonMode(save: false)
+        carousel.reasonRowID = id
+    }
+
+    /// Leave reason mode without recording anything, and drop the free-text
+    /// editor with it. The vote itself always stands — a reason is optional.
+    private func endReasonMode(save: Bool) {
+        carousel.reasonRowID = nil
+        if feedback.isOpen { feedback.close(save: save) }
+    }
+
+    /// Open a headline and record it, so the ranker learns what actually got
+    /// read. Only a successful open counts.
+    private func openNews(_ id: String, _ url: URL) {
+        endReasonMode(save: false)
+        if NSWorkspace.shared.open(url) {
+            NewsSource.recordOpen(itemId: id, url: url)
+            newsOpens.insert(id)
+            rebuildPages()
+        }
+        setExpanded(false)
     }
 
     /// Hold the pointer-exit collapse while a scroll gesture or its momentum is
@@ -237,7 +306,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: mock news
 
     /// A plausible ranked set for `NOTCH_MOCK=1`: varied sources and ages, one
-    /// title long enough to wrap, and a couple already voted.
+    /// title long enough to wrap, a couple already voted (one with a reason key,
+    /// one with free text), and a couple already read.
     private static func mockNews() -> NewsSummary {
         func at(_ hoursAgo: Double) -> String { ISODate.string(Date().addingTimeInterval(-hoursAgo * 3600)) }
         typealias I = NewsSummary.Item
@@ -250,19 +320,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               score: 0.91, reason: "directly relevant to this project", event: "macos-widgets", vote: 0),
             I(id: "n3", title: "Postgres 18 beta lands asynchronous I/O",
               source: "LWN", url: "https://lwn.net/", publishedAt: at(7.0),
-              score: 0.88, reason: "a database you use", event: nil, vote: 0),
+              score: 0.88, reason: "a database you use", event: nil, vote: 0, opened: true),
             I(id: "n4", title: "Rust 1.90 stabilises async closures",
               source: "Hacker News", url: "https://news.ycombinator.com/", publishedAt: at(9.5),
-              score: 0.86, reason: "a language you follow", event: "rust-1.90", vote: -1),
+              score: 0.86, reason: "a language you follow", event: "rust-1.90", vote: -1,
+              voteReason: "dup"),
             I(id: "n5", title: "A field guide to debugging CoreGraphics window levels",
               source: "Hacker News", url: "https://news.ycombinator.com/", publishedAt: at(13.0),
               score: 0.83, reason: "same private API this widget uses", event: nil, vote: 0),
             I(id: "n6", title: "Central bank holds rates, signals one cut before year end",
               source: "Reuters", url: "https://www.reuters.com/", publishedAt: at(18.0),
-              score: 0.79, reason: "macro news you track", event: "rates", vote: 0),
+              score: 0.79, reason: "macro news you track", event: "rates", vote: -1,
+              voteReason: "other", voteNote: "not what I wanted"),
             I(id: "n7", title: "Wayland finally gets colour management",
               source: "Phoronix", url: "https://www.phoronix.com/", publishedAt: at(23.0),
-              score: 0.74, reason: "a topic you follow", event: nil, vote: 0),
+              score: 0.74, reason: "a topic you follow", event: nil, vote: 0, opened: true),
             I(id: "n8", title: "GitHub Actions adds native ARM runners for open-source repos",
               source: "GitHub", url: "https://github.blog/", publishedAt: at(30.0),
               score: 0.71, reason: "relevant to CI", event: "ci", vote: 0),
@@ -345,6 +417,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: w)
         } else {
             openWork?.cancel()
+            // Reaching for the free-text editor means leaving the panel; that
+            // must not close the thing being typed into.
+            if feedbackEditorOpen { return }
             // Mid-scroll the pointer can drift out; defer rather than collapse
             // under the reader's hand.
             if scrollActive { collapsePending = true; return }
@@ -353,6 +428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func scheduleCollapse() {
+        guard !feedbackEditorOpen else { return }
         let w = DispatchWorkItem { [weak self] in self?.setExpanded(false) }
         closeWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.16, execute: w)
@@ -364,7 +440,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch page {
         case .meetings(let cards): return CarouselPanelView.panelHeight(meetingCards: cards.count)
         case .agents(let a): return CarouselPanelView.agentsHeight(a.needsAttention.count)
-        case .news(let n, _): return CarouselPanelView.newsHeight(n, width: expandedWidth)
+        case .news(let n, _, _): return CarouselPanelView.newsHeight(n, width: expandedWidth)
         case .weather: return CarouselPanelView.weatherHeight
         case .finance(let f): return CarouselPanelView.financeHeight(f)
         case .simple: return CarouselPanelView.panelHeight(meetingCards: 1)
@@ -406,6 +482,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setExpanded(_ expanded: Bool, force: Bool = false) {
         guard expanded != isExpanded || force else { return }
+        if !expanded { endReasonMode(save: false) }
         if expanded { refreshExternal() }       // pick up the latest summaries on open
         isExpanded = expanded
         bandView.cornerRadius = expanded ? 0 : 11
