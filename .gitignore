@@ -24,5 +24,6 @@ agents.json
 agents-ack.json
 news.json
 news-votes.json
+news-opens.json
 finance.json
 weather-config.json
