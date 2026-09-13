@@ -23,6 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentsSummary: AgentsSummary?
     private let weather = WeatherSource()
     private var weatherSummary: WeatherSummary?
+    private let newsSource = NewsSource()
+    private var newsSummary: NewsSummary?
+    private var newsVotes: [String: NewsVote] = [:]
     private var weatherTimer: Timer?
     private var externalTimer: Timer?
     private var mockMode = false
@@ -33,6 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var openWork: DispatchWorkItem?
     private var closeWork: DispatchWorkItem?
+    private var scrollActive = false        // a list gesture is running
+    private var collapsePending = false     // the pointer left mid-gesture
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let g = NotchGeometry.current() else {
@@ -55,10 +60,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.onHoverChange = { [weak self] hovering in self?.hoverChanged(hovering) }
         carousel.onCardClick = { [weak self] id in self?.acknowledge(id) }
         carousel.onAgentClick = { [weak self] id in self?.ackAgent(id) }
+        carousel.onNewsVote = { [weak self] id, direction in self?.voteNews(id, direction) }
+        carousel.onNewsOpen = { [weak self] url in
+            NSWorkspace.shared.open(url)
+            self?.setExpanded(false)
+        }
+        carousel.onScrollActivity = { [weak self] active in self?.scrollActivityChanged(active) }
+        carousel.onPageChange = { [weak self] in self?.resizeToCurrentPage() }
 
         panel = NotchPanel(contentRect: NSRect(x: 0, y: 0, width: 100, height: bandHeight))
         panel.contentView = container
+        panel.acceptsMouseMovedEvents = true
         panel.orderFrontRegardless()
+
+        newsVotes = NewsSource.overlay()   // the outbox is the record of what the reader voted
 
         space = CGSSpace(level: 2_147_483_647)
         space.windows = [panel]
@@ -92,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 hourly: [.init(label: "15h", tempC: 26, code: 1), .init(label: "17h", tempC: 24, code: 2),
                          .init(label: "19h", tempC: 21, code: 3), .init(label: "21h", tempC: 19, code: 61),
                          .init(label: "23h", tempC: 18, code: 3)])
+            newsSummary = Self.mockNews()
             rebuildPages()
             bandView.apply(BandState(left: "Daily RJ", right: "in 3m", urgency: .now))
             lastCards = mock
@@ -99,10 +115,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             updateFlash()
             if ProcessInfo.processInfo.environment["NOTCH_MOCK_EXPAND"] == "1" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    self?.setExpanded(true)
-                    if let p = ProcessInfo.processInfo.environment["NOTCH_MOCK_PAGE"], let i = Int(p) {
-                        self?.carousel.index = i
+                    guard let self else { return }
+                    if let p = ProcessInfo.processInfo.environment["NOTCH_MOCK_PAGE"] {
+                        if let i = Int(p) {
+                            self.carousel.index = i
+                        } else if let i = self.carousel.pages.firstIndex(where: { $0.name == p.lowercased() }) {
+                            self.carousel.index = i
+                        }
                     }
+                    self.setExpanded(true)
                 }
             }
             return
@@ -149,23 +170,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateFlash()
     }
 
-    /// Compose the carousel pages: meetings always first, finance if we have a
-    /// summary. Preserves the current page index when still valid.
+    /// Compose the carousel pages: meetings always first, then whichever
+    /// summaries exist. Preserves the current page index when still valid.
     private func rebuildPages() {
         var pages: [PageContent] = [.meetings(lastCards)]
         if let a = agentsSummary { pages.append(.agents(a)) }
+        if let n = newsSummary {
+            pages.append(.news(n, votes: NewsSource.effectiveVotes(n, overlay: newsVotes)))
+        }
         if let w = weatherSummary { pages.append(.weather(w)) }
         if let f = financeSummary { pages.append(.finance(f)) }
         let keep = min(carousel.index, pages.count - 1)
         carousel.pages = pages
         carousel.index = max(0, keep)
+        resizeToCurrentPage()   // a page can change height between refreshes
     }
 
     private func refreshExternal() {
         guard !mockMode else { return }
         financeSummary = finance.load()
         agentsSummary = agentsSource.load()
+        newsSummary = newsSource.load()
         rebuildPages()
+    }
+
+    /// Toggle semantics: voting the same way twice clears the vote. The outbox
+    /// records every click, including the clearing one.
+    private func voteNews(_ id: String, _ direction: Int) {
+        guard let s = newsSummary else { return }
+        let current = NewsSource.effectiveVotes(s, overlay: newsVotes)[id] ?? 0
+        newsVotes[id] = NewsSource.vote(itemId: id, vote: current == direction ? 0 : direction)
+        rebuildPages()
+    }
+
+    /// Hold the pointer-exit collapse while a scroll gesture or its momentum is
+    /// running, and re-arm it once the gesture settles.
+    private func scrollActivityChanged(_ active: Bool) {
+        scrollActive = active
+        if active {
+            closeWork?.cancel()
+        } else if collapsePending {
+            collapsePending = false
+            scheduleCollapse()
+        }
     }
 
     private func refreshWeather() {
@@ -185,6 +232,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let remaining = s.needsAttention.filter { $0.id != id }
         agentsSummary = AgentsSummary(asOf: s.asOf, count: remaining.count, needsAttention: remaining)
         rebuildPages()
+    }
+
+    // MARK: mock news
+
+    /// A plausible ranked set for `NOTCH_MOCK=1`: varied sources and ages, one
+    /// title long enough to wrap, and a couple already voted.
+    private static func mockNews() -> NewsSummary {
+        func at(_ hoursAgo: Double) -> String { ISODate.string(Date().addingTimeInterval(-hoursAgo * 3600)) }
+        typealias I = NewsSummary.Item
+        let items: [I] = [
+            I(id: "n1", title: "Swift 6.2 ships typed throws for the standard library",
+              source: "Swift Forums", url: "https://forums.swift.org/", publishedAt: at(2.1),
+              score: 0.94, reason: "matches a language you follow", event: "swift-6.2", vote: 1),
+            I(id: "n2", title: "Apple opens the notch area to third-party widgets in the next macOS point release, with a new entitlement",
+              source: "Ars Technica", url: "https://arstechnica.com/", publishedAt: at(4.6),
+              score: 0.91, reason: "directly relevant to this project", event: "macos-widgets", vote: 0),
+            I(id: "n3", title: "Postgres 18 beta lands asynchronous I/O",
+              source: "LWN", url: "https://lwn.net/", publishedAt: at(7.0),
+              score: 0.88, reason: "a database you use", event: nil, vote: 0),
+            I(id: "n4", title: "Rust 1.90 stabilises async closures",
+              source: "Hacker News", url: "https://news.ycombinator.com/", publishedAt: at(9.5),
+              score: 0.86, reason: "a language you follow", event: "rust-1.90", vote: -1),
+            I(id: "n5", title: "A field guide to debugging CoreGraphics window levels",
+              source: "Hacker News", url: "https://news.ycombinator.com/", publishedAt: at(13.0),
+              score: 0.83, reason: "same private API this widget uses", event: nil, vote: 0),
+            I(id: "n6", title: "Central bank holds rates, signals one cut before year end",
+              source: "Reuters", url: "https://www.reuters.com/", publishedAt: at(18.0),
+              score: 0.79, reason: "macro news you track", event: "rates", vote: 0),
+            I(id: "n7", title: "Wayland finally gets colour management",
+              source: "Phoronix", url: "https://www.phoronix.com/", publishedAt: at(23.0),
+              score: 0.74, reason: "a topic you follow", event: nil, vote: 0),
+            I(id: "n8", title: "GitHub Actions adds native ARM runners for open-source repos",
+              source: "GitHub", url: "https://github.blog/", publishedAt: at(30.0),
+              score: 0.71, reason: "relevant to CI", event: "ci", vote: 0),
+            I(id: "n9", title: "The Verge reviews the new mini PCs for home servers",
+              source: "The Verge", url: "https://www.theverge.com/", publishedAt: at(38.0),
+              score: 0.68, reason: "hardware you follow", event: nil, vote: 0),
+            I(id: "n10", title: "SQLite adds a JSONB storage format",
+              source: "Hacker News", url: "https://news.ycombinator.com/", publishedAt: at(46.0),
+              score: 0.64, reason: "a database you use", event: nil, vote: 0),
+            I(id: "n11", title: "Study finds sleep regularity beats duration for cardiovascular risk",
+              source: "Nature", url: "https://www.nature.com/", publishedAt: at(55.0),
+              score: 0.60, reason: "a health topic", event: nil, vote: 0),
+            I(id: "n12", title: "Vercel drops per-seat pricing for hobby projects",
+              source: "TechCrunch", url: "https://techcrunch.com/", publishedAt: at(69.0),
+              score: 0.57, reason: "a platform you use", event: nil, vote: 0),
+            I(id: "n13", title: "A minimal terminal multiplexer in 900 lines of C",
+              source: "Hacker News", url: "https://news.ycombinator.com/", publishedAt: at(80.0),
+              score: 0.53, reason: "weekend-read shape", event: nil, vote: 0),
+        ]
+        return NewsSummary(
+            asOf: ISODate.string(Date().addingTimeInterval(-1800)),
+            brief: "Quiet morning overall. The one thing worth your time is Apple's widget entitlement, "
+                 + "which would replace the private-API trick this widget relies on. "
+                 + "nothing else stood out.",
+            count: items.count, items: items)
     }
 
     // MARK: ≤5-minute flash
@@ -236,31 +339,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func hoverChanged(_ hovering: Bool) {
         if hovering {
             closeWork?.cancel()
+            collapsePending = false
             let w = DispatchWorkItem { [weak self] in self?.setExpanded(true) }
             openWork = w
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: w)
         } else {
             openWork?.cancel()
-            let w = DispatchWorkItem { [weak self] in self?.setExpanded(false) }
-            closeWork = w
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16, execute: w)
+            // Mid-scroll the pointer can drift out; defer rather than collapse
+            // under the reader's hand.
+            if scrollActive { collapsePending = true; return }
+            scheduleCollapse()
+        }
+    }
+
+    private func scheduleCollapse() {
+        let w = DispatchWorkItem { [weak self] in self?.setExpanded(false) }
+        closeWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16, execute: w)
+    }
+
+    /// Each page states its own height; the panel is sized to whichever one is
+    /// showing rather than to the tallest.
+    private func pageHeight(_ page: PageContent) -> CGFloat {
+        switch page {
+        case .meetings(let cards): return CarouselPanelView.panelHeight(meetingCards: cards.count)
+        case .agents(let a): return CarouselPanelView.agentsHeight(a.needsAttention.count)
+        case .news(let n, _): return CarouselPanelView.newsHeight(n, width: expandedWidth)
+        case .weather: return CarouselPanelView.weatherHeight
+        case .finance(let f): return CarouselPanelView.financeHeight(f)
+        case .simple: return CarouselPanelView.panelHeight(meetingCards: 1)
+        }
+    }
+
+    private func currentPanelHeight() -> CGFloat {
+        guard carousel.pages.indices.contains(carousel.index) else {
+            return CarouselPanelView.panelHeight(meetingCards: meetingCount)
+        }
+        return pageHeight(carousel.pages[carousel.index])
+    }
+
+    /// Grow or shrink the open panel to the page the user just navigated to.
+    private func resizeToCurrentPage() {
+        guard isExpanded else { return }
+        let (frame, gapMinX) = geo.expandedFrame(width: expandedWidth,
+                                                 panelHeight: currentPanelHeight(), barExtra: barExtra)
+        guard frame.height != panel.frame.height else { return }
+        bandView.gapMinX = gapMinX
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.14
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().setFrame(frame, display: true)
+        }, completionHandler: { [weak self] in self?.layoutBandAndCarousel(in: frame) })
+    }
+
+    private func layoutBandAndCarousel(in frame: NSRect) {
+        let w = frame.width
+        if isExpanded {
+            bandView.frame = NSRect(x: 0, y: frame.height - bandHeight, width: w, height: bandHeight)
+            carousel.frame = NSRect(x: 0, y: 0, width: w, height: frame.height - bandHeight)
+        } else {
+            bandView.frame = NSRect(x: 0, y: 0, width: w, height: bandHeight)
+            carousel.frame = NSRect(x: 0, y: 0, width: w, height: 0)
+            carousel.isHidden = true
         }
     }
 
     private func setExpanded(_ expanded: Bool, force: Bool = false) {
         guard expanded != isExpanded || force else { return }
-        isExpanded = expanded
         if expanded { refreshExternal() }       // pick up the latest summaries on open
+        isExpanded = expanded
         bandView.cornerRadius = expanded ? 0 : 11
 
         let frame: NSRect
         if expanded {
             carousel.isHidden = false
-            var ph = CarouselPanelView.panelHeight(meetingCards: meetingCount)
-            if let a = agentsSummary { ph = max(ph, CarouselPanelView.agentsHeight(a.needsAttention.count)) }
-            if weatherSummary != nil { ph = max(ph, CarouselPanelView.weatherHeight) }
-            if let f = financeSummary { ph = max(ph, CarouselPanelView.financeHeight(f)) }
-            let (f, gapMinX) = geo.expandedFrame(width: expandedWidth, panelHeight: ph, barExtra: barExtra)
+            let (f, gapMinX) = geo.expandedFrame(width: expandedWidth,
+                                                 panelHeight: currentPanelHeight(), barExtra: barExtra)
             bandView.gapMinX = gapMinX
             frame = f
         } else {
@@ -274,18 +428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ctx.duration = 0.24
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().setFrame(frame, display: true)
-        }, completionHandler: { [weak self] in
-            guard let self else { return }
-            let w = frame.width
-            if self.isExpanded {
-                self.bandView.frame = NSRect(x: 0, y: frame.height - self.bandHeight, width: w, height: self.bandHeight)
-                self.carousel.frame = NSRect(x: 0, y: 0, width: w, height: frame.height - self.bandHeight)
-            } else {
-                self.bandView.frame = NSRect(x: 0, y: 0, width: w, height: self.bandHeight)
-                self.carousel.frame = NSRect(x: 0, y: 0, width: w, height: 0)
-                self.carousel.isHidden = true
-            }
-        })
+        }, completionHandler: { [weak self] in self?.layoutBandAndCarousel(in: frame) })
     }
 
     private func log(_ s: String) {
