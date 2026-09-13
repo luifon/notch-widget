@@ -9,8 +9,18 @@ import AppKit
 /// level: high enough to float over ordinary windows, low enough that the notch
 /// panel still paints over it.
 final class FeedbackPanel: NSPanel {
+    /// Called when the reader clicks the editor while some other app holds
+    /// focus. A non-activating panel won't take it back on its own, so the
+    /// owner re-activates and re-focuses the field.
+    var onClickWhileInactive: (() -> Void)?
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown && !NSApp.isActive { onClickWhileInactive?() }
+        super.sendEvent(event)
+    }
 }
 
 /// Draws the editor's surface: the same tile treatment as the panel's own tiles,
@@ -71,6 +81,12 @@ final class FeedbackEditor: NSObject, NSTextFieldDelegate {
         // focus parked on an app with no windows.
         previousApp = NSWorkspace.shared.frontmostApplication
         p.makeKeyAndOrderFront(nil)
+        takeFocus()
+    }
+
+    /// Bring the app forward and put the caret back in the field.
+    private func takeFocus() {
+        guard let p = panel else { return }
         activateSelf()
         if let f = field {
             p.makeFirstResponder(f)
@@ -124,6 +140,10 @@ final class FeedbackEditor: NSObject, NSTextFieldDelegate {
         // Above ordinary windows, below the notch panel's own space.
         p.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 2)
         p.collectionBehavior = [.fullScreenAuxiliary, .stationary, .canJoinAllSpaces, .ignoresCycle]
+        p.onClickWhileInactive = { [weak self] in
+            guard let self, self.isOpen else { return }
+            DispatchQueue.main.async { self.takeFocus() }
+        }
 
         let view = FeedbackEditorView(frame: NSRect(origin: .zero, size: Self.size))
         let f = NSTextField(frame: NSRect(x: 13, y: 30, width: Self.size.width - 26, height: 22))
