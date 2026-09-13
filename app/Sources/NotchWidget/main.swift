@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         carousel.onNewsVote = { [weak self] id, direction in self?.voteNews(id, direction) }
         carousel.onNewsReason = { [weak self] id, key in self?.pickReason(id, key) }
         carousel.onNewsReasonEdit = { [weak self] id in self?.enterReasonMode(id) }
+        carousel.onNewsReasonDismiss = { [weak self] in self?.endReasonMode(save: false) }
         carousel.onNewsOpen = { [weak self] id, url in self?.openNews(id, url) }
         carousel.onScrollActivity = { [weak self] active in self?.scrollActivityChanged(active) }
         carousel.onPageChange = { [weak self] in
@@ -325,9 +326,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               source: "Hacker News", url: "https://news.ycombinator.com/", publishedAt: at(9.5),
               score: 0.86, reason: "your main hobby language", event: "rust-1.90", vote: -1,
               voteReason: "dup"),
+            // Downvoted before reasons existed — no key, so the row offers `why?`.
             I(id: "n5", title: "A field guide to debugging CoreGraphics window levels",
               source: "Hacker News", url: "https://news.ycombinator.com/", publishedAt: at(13.0),
-              score: 0.83, reason: "same private API this widget uses", event: nil, vote: 0),
+              score: 0.83, reason: "same private API this widget uses", event: nil, vote: -1),
             I(id: "n6", title: "Central bank holds rates, signals one cut before year end",
               source: "Reuters", url: "https://www.reuters.com/", publishedAt: at(18.0),
               score: 0.79, reason: "affects your projection assumptions", event: "rates", vote: -1,
