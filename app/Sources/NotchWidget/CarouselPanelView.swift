@@ -27,7 +27,14 @@ enum PageContent {
 /// panel, surface tiles, amber corner tag, mono type. One page at a time.
 final class CarouselPanelView: NSView {
     var pages: [PageContent] = [] { didSet { clampIndex(); newsDataChanged(); needsDisplay = true } }
-    var index: Int = 0 { didSet { newsScroll = 0; hoveredNewsID = nil; needsDisplay = true } }
+    // Only a real page change resets the news scroll; rebuilds re-assign the
+    // same index (votes, opens, refresh) and must keep the reader's place.
+    var index: Int = 0 {
+        didSet {
+            if index != oldValue { newsScroll = 0; hoveredNewsID = nil }
+            needsDisplay = true
+        }
+    }
     var cornerRadius: CGFloat = 18
 
     static let headerH: CGFloat = 54   // header bar + a clear gap before content
