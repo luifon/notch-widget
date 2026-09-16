@@ -94,6 +94,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if ProcessInfo.processInfo.environment["NOTCH_MOCK"] == "1" {
             mockMode = true
+            // SYNTHETIC ONLY. This repo is public. Never paste real names,
+            // meeting titles, holdings, figures, agent branches, or ranking
+            // reasons here — the secret scanner cannot catch plain profile text.
             let mock: [MeetingCard] = [
                 MeetingCard(id: "m1", title: "Daily RJ", time: "10:00 – 10:30 · in 3m", sender: "Rafael J.", urgency: .now),
                 MeetingCard(id: "m2", title: "Client sync — a longer title that should truncate", time: "11:00 – 11:45 · in 12m", sender: "Marina Alves", urgency: .soon),
@@ -309,6 +312,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// A plausible ranked set for `NOTCH_MOCK=1`: varied sources and ages, one
     /// title long enough to wrap, a couple already voted (one with a reason key,
     /// one with free text), and a couple already read.
+    ///
+    /// SYNTHETIC ONLY (public repo). The `reason`/`voteNote`/`brief` strings must
+    /// stay generic — never encode a real interest, habit, or datable event.
     private static func mockNews() -> NewsSummary {
         func at(_ hoursAgo: Double) -> String { ISODate.string(Date().addingTimeInterval(-hoursAgo * 3600)) }
         typealias I = NewsSummary.Item
