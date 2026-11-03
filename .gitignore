@@ -9,9 +9,6 @@ DerivedData/
 # macOS
 .DS_Store
 
-# Real secret denylist — GITIGNORED, never committed. Only the .example ships.
-.secret-strings
-
 # Local codesigning identity override, scratch, logs
 .env
 *.log

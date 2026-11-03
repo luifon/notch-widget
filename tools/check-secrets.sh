@@ -2,7 +2,7 @@
 # Block leaks of personal information into committed source.
 #
 # Scans stdin (a `git diff --cached` or proposed Write/Edit content) against
-# four independent layers and exits non-zero on ANY hit. Called from three
+# three independent layers and exits non-zero on ANY hit. Called from three
 # places (all pipe through here, so strengthening this arms all of them):
 #   1. .git/hooks/pre-commit              — staged diff piped in
 #   2. Claude PreToolUse on Bash          — staged diff on `git commit`
@@ -10,9 +10,6 @@
 #
 # Layers:
 #   A. Live `.env` VALUES (tokens/IDs/allowlisted names >=6 chars) — substring.
-#   B. Curated denylist `.secret-strings` (gitignored) — the sensitive
-#      literals the `.env`-value layer can't see (third-party names, etc.).
-#      Whole-word, case-insensitive, any length.
 #   C. Generic PII heuristics — personal emails, phone/E.164, chat JIDs +
 #      snowflake IDs, and the operator's home path. Catches personal data
 #      even when it isn't registered anywhere.
@@ -20,15 +17,19 @@
 #      ~/.claude/skills (operator-personal) but NOT in .claude/skills
 #      (repo-wired). That content belongs in the personal tree, never here.
 #
+# Denylisted terms (names, companies, clients) are not scanned here: the
+# machine-wide commit guard (~/.config/commit-guard), run by the global git
+# hooks before .git/hooks/pre-commit, scans every commit's added lines, new
+# paths and message against ~/.config/commit-guard/denylist.
+#
 # Nothing sensitive is hardcoded in this file — every literal is derived at
-# runtime from .env / the gitignored denylist / the personal-skill tree, so
+# runtime from .env / the personal-skill tree, so
 # the guard itself is safe to commit. Bypass intentionally: git commit --no-verify.
 
 set -euo pipefail
 
 WORKSPACE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 ENV_FILE="$WORKSPACE_ROOT/.env"
-DENYLIST="$WORKSPACE_ROOT/.secret-strings"
 
 # ── build the exact-literal blocklists ──────────────────────────────────────
 # SUBSTR: matched as substrings (grep -F). WORD: matched whole-word (grep -iwF).
@@ -63,16 +64,6 @@ if [ -f "$ENV_FILE" ]; then
   [ -n "${HOME:-}" ] && [ ${#HOME} -ge 6 ] && SUBSTR+=("$HOME")
 fi
 
-# B. curated denylist (gitignored) — whole-word so distinctive names can be
-# listed without false-positiving as substrings.
-if [ -f "$DENYLIST" ]; then
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in ''|'#'*) continue ;; esac
-    line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
-    [ -n "$line" ] && WORD+=("$line")
-  done < "$DENYLIST"
-fi
-
 # D. operator-personal-skill names = ls ~/.claude/skills MINUS repo-wired
 # .claude/skills. Whole-word. A tiny allowlist covers generic/functional
 # markers that legitimately appear as constants in infra code.
@@ -100,7 +91,7 @@ esac
 
 FOUND=()
 
-# A/B/D exact-literal matches
+# A/D exact-literal matches
 for pat in ${SUBSTR[@]+"${SUBSTR[@]}"}; do
   printf '%s' "$HAY" | grep -F -- "$pat" >/dev/null 2>&1 && FOUND+=("value:$pat")
 done
@@ -129,7 +120,7 @@ if [ ${#FOUND[@]} -gt 0 ]; then
     echo ""
     echo "  Personal info, third-party identifiers, and operator-personal-skill"
     echo "  content do not belong in this public repo. See README.md."
-    echo "  Route real values through .env / .secret-strings / ~/.claude/skills."
+    echo "  Route real values through .env / ~/.config/commit-guard/denylist / ~/.claude/skills."
     echo "  Bypass intentionally: git commit --no-verify"
   } >&2
   exit 2

@@ -57,8 +57,11 @@ Install it after cloning:
 ./tools/install-hooks.sh
 ```
 
-It scans staged changes for a gitignored denylist (`.secret-strings`), plus
-generic PII (emails, phone numbers, home paths). See `tools/check-secrets.sh`.
+It scans staged changes for generic PII (emails, phone numbers, home paths),
+`.env` values and personal skill names. See `tools/check-secrets.sh`. Names,
+companies and other denylisted terms are scanned by a machine-wide commit
+guard outside this repo (`~/.config/commit-guard`, run from the global git
+hooks), which also covers file paths and commit messages.
 
 ## License
 
